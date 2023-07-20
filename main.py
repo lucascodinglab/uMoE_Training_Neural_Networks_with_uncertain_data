@@ -1,3 +1,10 @@
+# -*- coding: utf-8 -*-
+"""
+Created on Thu Jul 20 17:50:28 2023
+
+@author: lucas
+"""
+
 
 
 import uframe as uf
@@ -51,12 +58,12 @@ class MoE():
         pass
         
     
-    def fit(self, train_data, train_target, valid_data = None, valid_target = None, reg_alpha = 0.5, reg_lambda = 0.0003, lr = 0.001, local_mode = True, n_samples = 100, threshhold_samples = .5, weighted_experts = True, weighted_gate = False, verbose = False ): 
+    def fit(self, train_data, train_target, valid_data = None, valid_target = None, reg_alpha = 0.5, reg_lambda = 0.0003, lr = 0.001, local_mode = True, n_samples = 100, threshold_samples = .5, weighted_experts = True, weighted_gate = False, verbose = False ): 
         self.train_data = train_data
 
         # sampling of KDE and Restriction of samples
         sampled_data = train_data.sample(n_samples)
-        sampled_data = self.__threshold_sampling(sampled_data, n_samples, threshhold_samples)
+        sampled_data = self.__threshold_sampling(sampled_data, n_samples, threshold_samples)
         
         # clustering
         labels_sample, labels_valid = self.__clustering(self.n_experts, sampled_data, valid_data)
@@ -70,6 +77,7 @@ class MoE():
         
         # Search the local Mode Value for dominante Cluster
         if local_mode == True:
+            data = self.__local_cluster_mode(train_data, prob_dist_train)
             
         
         #Mode 
@@ -86,10 +94,10 @@ class MoE():
         
         pass
         
-    def __threshold_sampling(self, sampled_data, n_samples, threshhold_samples):
-        if threshhold_samples <1: 
+    def __threshold_sampling(self, sampled_data, n_samples, threshold_samples):
+        if threshold_samples <1: 
             ind=[]
-            n_choosen = round(n_samples * threshhold_samples)
+            n_choosen = round(n_samples * threshold_samples)
             
             for i in range(len(self.train_data)): 
                 pdfs = self.train_data.data[i].pdf(sampled_data[i*n_samples:(i+1)*n_samples,:])
@@ -142,7 +150,7 @@ class MoE():
         Input: train_data, prob_dist(One-Hot_Encoded Prob. Distribution)
         Output: train_data (with new mode values)
         """
-        
+        pass
         
             
     def _init_model(self):
@@ -255,7 +263,7 @@ if __name__ == "__main__":
     X.analysis(X_true, save= "filename", bins = 20)
     
     moe = MoE(4)
-    moe.fit(X,y)
+    moe.fit(X,y,threshold_samples=0.5)
     
     
 
