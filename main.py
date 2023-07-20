@@ -1,36 +1,16 @@
-# -*- coding: utf-8 -*-
-"""
-Created on Thu Jul 20 10:14:16 2023
 
-@author: Christian
-"""
-#fdasdfasdfasdf
+
 import uframe as uf
-import scipy
 import numpy as np
 from sklearn.datasets import fetch_california_housing
 from sklearn.preprocessing import MinMaxScaler, StandardScaler
 from sklearn.cluster import KMeans
-#data loading and preprocessing: 
-data = fetch_california_housing()
-
-
-#scaling 
-
-X_true = MinMaxScaler().fit_transform(data.data[:1000,:])
-Y = StandardScaler().fit_transform(data.target.reshape(-1,1))
+import torch.nn as nn
+import torch
 
 
 
-#uncertainty in data 
-X = uf.uframe_from_array_mice(X_true, kernel = "gaussian" , p =.5, mice_iterations = 2)
-X.analysis(X_true, save= "filename", bins = 20)
-
-
-
-
-
-class MoE (): 
+class MoE(): 
     """
     
     A class used for storing and working with uncertain data.
@@ -71,18 +51,26 @@ class MoE ():
         pass
         
     
-    def fit(self, train_data, train_target, valid_data = False, valid_target = False, reg_alpha = 0.5, reg_lambda = 0.0003, lr = 0.001, local_mode = True, n_samples = 100, threshhold_samples = .5, weighted_experts = True, weighted_gate = False, verbose = False ): 
+    def fit(self, train_data, train_target, valid_data = None, valid_target = None, reg_alpha = 0.5, reg_lambda = 0.0003, lr = 0.001, local_mode = True, n_samples = 100, threshhold_samples = .5, weighted_experts = True, weighted_gate = False, verbose = False ): 
         self.train_data = train_data
 
-
-        #clustering 
-        
+        # sampling of KDE and Restriction of samples
         sampled_data = train_data.sample(n_samples)
+        sampled_data = self.__threshold_sampling(sampled_data, n_samples, threshhold_samples)
         
-        sampled_data = self.__treshhold_sampling(sampled_data, n_samples, threshhold_samples)
+        # clustering
+        labels_sample, labels_valid = self.__clustering(self.n_experts, sampled_data, valid_data)
+        print(type(labels_sample))
         
-        clustering = KMeans(n_clusters = self.n_experts).fit(sampled_data)
+        # distribution of probability mass after clustering
+        prob_dist_train = self.__prob_mass_cluster(self.n_experts, labels_sample, n_samples)
+        if labels_valid is not None:
+            prob_dist_valid = self.__prob_mass_cluster(self.n_experts, labels_valid)
+        print(prob_dist_train) 
         
+        # Search the local Mode Value for dominante Cluster
+        if local_mode == True:
+            
         
         #Mode 
         train_data.mode()
@@ -96,12 +84,9 @@ class MoE ():
         #train gate 
         
         
-        
-        
-        
         pass
-    
-    def __threshhold_sampling(self, sampled_data, n_samples, threshhold_samples):
+        
+    def __threshold_sampling(self, sampled_data, n_samples, threshhold_samples):
         if threshhold_samples <1: 
             ind=[]
             n_choosen = round(n_samples * threshhold_samples)
@@ -118,6 +103,47 @@ class MoE ():
             sampled_data = sampled_data[np.concatenate(ind, axis = 0 ),]                
                 
         return sampled_data
+    
+    def __clustering(self, n_experts, sampled_data, valid_data):
+        """
+        Function: Clustering of samples to decompose the input space for the experts
+        Input: n_experts (size of cluster), sampled_data (samples of Train Data), Valid_data
+        Ouput: labels of Clustering (array)
+        """
+        cluster_distribution = np.empty(())
+        kmeans = KMeans(n_clusters = n_experts).fit(sampled_data)
+        labels_sample = kmeans.labels_
+        if valid_data is not None:
+            labels_valid = kmeans.predict(valid_data.mode())
+            return labels_sample, labels_valid
+        else:
+            return labels_sample, None
+            
+    def __prob_mass_cluster(self, n_experts, labels, n_samples = 1):
+        """
+        Function: Get Probability Distribution across Clusters
+        Input: n_experts, labels (train,val,test), n_samples
+        Output: prob_dist (Distribution of Probability Mass across Clusters in One-Hot-Encoded (ndarray))
+        """
+        num_sections = len(labels) // n_samples
+        prob_dist = np.zeros((num_sections, n_experts))
+        
+        for i in range(num_sections):
+            section = labels[i * n_samples : (i + 1) * n_samples]
+            unique_cluster, counts = np.unique(section, return_counts=True)
+            relative_frequency = counts / len(section)
+            prob_dist[i][unique_cluster - 1] = relative_frequency
+        return prob_dist
+    
+    
+    def __local_cluster_mode(self, train_data, prob_dist):
+        """
+        Function: Maximize for every Instance the Mode value, where the most prob. Mass lies
+        Input: train_data, prob_dist(One-Hot_Encoded Prob. Distribution)
+        Output: train_data (with new mode values)
+        """
+        
+        
             
     def _init_model(self):
     
@@ -127,14 +153,7 @@ class MoE ():
         
     
     
-# -*- coding: utf-8 -*-
-"""
-@author: Christian
 
-Function building a normal MLP network
-"""
-import torch.nn as nn
-import torch
 
 
 class custom_nn(nn.Module):
@@ -217,3 +236,30 @@ def eval_moe(**kwargs):
     
     
     pass
+
+if __name__ == "__main__":
+    
+    #data loading and preprocessing: 
+    data = fetch_california_housing()
+
+
+    #scaling 
+
+    X_true = MinMaxScaler().fit_transform(data.data[:50,:])
+    y = StandardScaler().fit_transform(data.target.reshape(-1,1))
+
+
+
+    #uncertainty in data 
+    X = uf.uframe_from_array_mice(X_true, kernel = "gaussian" , p =.5, mice_iterations = 2)
+    X.analysis(X_true, save= "filename", bins = 20)
+    
+    moe = MoE(4)
+    moe.fit(X,y)
+    
+    
+
+
+
+    
+    
