@@ -13,6 +13,7 @@ from scipy.optimize import basinhopping
 from scipy.spatial.distance import cdist
 from torch.utils.data import DataLoader, Dataset
 import copy
+import warnings
 
 
 class MoE(): 
@@ -36,7 +37,8 @@ class MoE():
 
     """
 
-    
+    # Ignore RuntimeWarnings
+    warnings.filterwarnings("ignore", category=RuntimeWarning)
     def __init__(self, n_experts, hidden_experts = [64,64], hidden_gate = [64,64], dropout = 0, inputsize = 1, outputsize = 1, probs_to_gate = True) : 
     
         self.n_experts = n_experts 
@@ -60,7 +62,7 @@ class MoE():
         self.train_data = train_data
 
         # sampling of KDE and Restriction of samples
-        sampled_data = train_data.sample(n_samples)
+        sampled_data = train_data.sample(n_samples,seed = 1)
         sampled_data = self.__threshold_sampling(sampled_data, n_samples, threshold_samples)
         
         # clustering
@@ -68,16 +70,21 @@ class MoE():
         print(type(labels_sample))
         
         # distribution of probability mass after clustering
-        prob_dist_train = self.__prob_mass_cluster(self.n_experts, labels_sample, n_samples)
+        threshold_samples_count = int(n_samples * threshold_samples)
+        prob_dist_train = self.__prob_mass_cluster(self.n_experts, labels_sample, threshold_samples_count)
         if labels_valid is not None:
             prob_dist_valid = self.__prob_mass_cluster(self.n_experts, labels_valid)
         print(prob_dist_train) 
         
+        
         # Search the local Mode Value for dominante Cluster
         if local_mode == True:
-            data = self.__local_cluster_mode(train_data, prob_dist_train)
-          
-        # Load Train und Validation Set for Training of Experts 
+             train_data_local_mode =  self.__local_cluster_mode(train_data, prob_dist_train, kmeans)
+             # Load lodal Mode Train set
+             train_dataset_experts_local = CustomDataset(train_data_local_mode, train_target)
+             train_loader_experts_local = DataLoader(train_dataset_experts_local, batch_size_experts)
+            
+        # Load Global Mode Train und Validation Set for Training of Experts 
         train_dataset_experts = CustomDataset(train_data.mode(), train_target)
         train_loader_experts = DataLoader(train_dataset_experts, batch_size_experts)
         if valid_data is not None:
@@ -87,7 +94,7 @@ class MoE():
             valid_loader_experts = None
         
         # Get Information about Prediction Task
-        task, output_size = self.__get_taks_type(np.array(train_target))
+        task, output_size = self.__get_task_type(np.array(train_target))
         # binary classification
         if task == 1:
               loss_fn = nn.BCELoss() 
@@ -175,79 +182,61 @@ class MoE():
         """
         n_clusters = prob_dist.shape[1]
         centroids = kmeans.cluster_centers_
- 
+        data_local_mode = data.mode().copy()
+        dominant_cluster = np.argmax(prob_dist, axis=1)
+        for i, instance in tqdm(enumerate(data_local_mode), total=len(data_local_mode), desc="Search Local Cluster Mode..."):
+            missing_dims = data.data[i].indices[1]
+            cluster = dominant_cluster[i]
+            if len(missing_dims) > 0:
+                instance = data_local_mode[i].copy()
+                # get kde for instance
+                kde = data.data[i].continuous
+                # Calculate Mode value per Cluster
+                minimizer_kwargs = {
+                    'options': {'maxiter': 50}  # Limit the maximum number of iterations
+                }   
+                cluster_centers = np.take(kmeans.cluster_centers_[cluster], missing_dims)
+                # print(cluster_centers)
+                def objective_function(x, cluster, kde, instance, missing_dims, centroids):
+                    """
+                    Function: Moves the Gradient to the Max. of the KDE under the Restriction, 
+                    that the instance with the local mode lies in the cluster, where most prob. mass lies
+                    """
+                    inst = instance.copy()
+                    x = np.array(x)  
+                    inst[missing_dims] = x
+                    inst = inst.reshape(1, -1)
+                    # Distance to all Centroids
+                    distances = cdist(centroids, inst)
+                    # Index of closest Centroid
+                    closest_cluster = np.argmin(distances)
+                    # Find the closest point and get its cluster label
+                    
+                    return -kde.score_samples(x.reshape(1,-1)) if closest_cluster == cluster else np.inf
 
-        # # pre Cluster all points to get Cluster correspondance of closest cluster
-        # for i in tqdm(self.train_data.data, total = len(self.train_data.data), desc="Search Local Cluster Mode..."):
-            
-            
-        #     missing_dims = np.where(np.isnan(xx))[0]  # Get the indices of missing dimensions
-        #     prob_mass = 0
-        #     if len(missing_dims) > 0:
-        #         sorted_indexes = np.argsort(-cluster_values[pos])
-        #         # values in descending order
-        #         sorted_values = cluster_values[pos, sorted_indexes]
-        #         for value, cluster in zip(sorted_values, sorted_indexes):
-        #             if prob_mass < threshold:
-        #                 instance = xx.copy()
-        #                 # get kde for instance
-        #                 # print(pos)
-        #                 # print(instance)
-        #                 # print("Cluster: ", cluster, value)
-        #                 kde = kde_models_dict[pos]
-        #                 # Calculate Mode value per Cluster
-        #                 minimizer_kwargs = {
-        #                     'options': {'maxiter': 50}  # Limit the maximum number of iterations
-        #                 }   
-        #                 # print(modal_values)
-        #                 cluster_centers = np.take(kmeans.cluster_centers_[cluster],missing_dims)
-        #                 # print(cluster_centers)
-        #                 # optimize_modal = minimize(lambda x: objective_function(x, cluster, kde, instance.values, missing_dims, centroids), x0=cluster_centers, method='BFGS', options={'maxiter': 500, 'ftol': 1e-8, 'xtol': 1e-8})
-        #                 optimize_modal = basinhopping(lambda x: objective_function(x, cluster, kde, instance.values, missing_dims, centroids), x0=cluster_centers, minimizer_kwargs=minimizer_kwargs, niter=15, stepsize=0.2)                                    
-        #                 modal_values = optimize_modal.x.tolist()
-        #                 # print(instance)
-        #                 for i, modal_value in zip(missing_dims, modal_values):
-        #                     instance[i] = modal_value
-        #                 instance["index"] = pos
-        #                 instance["Probability Mass"] = value
-        #                 instance["y"] = y_train[pos]
-        #                 instance = instance.filter(regex=r'^(?!cluster_).*')
-        #                 train_experts_list[cluster].loc[len(train_experts_list[cluster])] = instance
-        #                 prob_mass += value
-        #                 # print(prob_mass)
-        #     else:
-        #         # print("not missing")
-        #         # print(xx)
-        #         # print("ix: ",ix)
-        #         no_nan_inst = no_nan_instances.loc[ix]
-        #         # print(no_nan_inst)
-        #         cluster_name = int(no_nan_inst["Cluster"])
-        #         no_nan_inst = no_nan_inst.iloc[:-int(n_clusters+1)]
-        #         no_nan_inst["index"] = pos
-        #         no_nan_inst["Probability Mass"] = 1.0
-        #         no_nan_inst["y"] = y_train[pos]
-        #         train_experts_list[cluster_name].loc[len(train_experts_list[cluster_name])] = no_nan_inst
-                        
-        #         # position of the instance (not index)
-        #     pos += 1
+                optimize_modal = basinhopping(lambda x: objective_function(x, cluster, kde, instance, missing_dims, centroids), x0=cluster_centers, minimizer_kwargs=minimizer_kwargs, niter=15, stepsize=0.2)                                    
+                modal_values = optimize_modal.x.tolist()
+                # print(instance)
+                for i, modal_value in zip(missing_dims, modal_values):
+                    instance[i] = modal_value
+                data_local_mode[i] = instance
+          
+        return data_local_mode
         
-            
-        # return train_data_local_mode
-        
-        def __get_task_type(y):
-            """
-            Function: get the predictions task type, as well as the output size
-            """
-            num_unique_values = len(np.unique(y))
-            # binary classification
-            if num_unique_values == 2:
-                return 1, num_unique_values
-            # multiclass classification
-            elif num_unique_values > 2 and num_unique_values <= 20:
-                return 2, num_unique_values
-            # regression
-            else:
-                return 3, 1
+    def __get_task_type(self, y):
+        """
+        Function: get the predictions task type, as well as the output size
+        """
+        num_unique_values = len(np.unique(y))
+        # binary classification
+        if num_unique_values == 2:
+            return 1, num_unique_values
+        # multiclass classification
+        elif num_unique_values > 2 and num_unique_values <= 20:
+            return 2, num_unique_values
+        # regression
+        else:
+            return 3, 1
         
         
         
@@ -424,10 +413,9 @@ if __name__ == "__main__":
     #scaling 
 
     X_true = MinMaxScaler().fit_transform(data.data[:50,:])
-    y = StandardScaler().fit_transform(data.target.reshape(-1,1))
+    y = StandardScaler().fit_transform(data.target[:50].reshape(-1,1))
     
 
-    data = np.concatenate((X_true,y[:50]),axis=1)
     #uncertainty in data 
     X = uf.uframe_from_array_mice(X_true, kernel = "gaussian" , p =.5, mice_iterations = 2)
     X.analysis(X_true, save= "filename", bins = 20)
@@ -435,12 +423,8 @@ if __name__ == "__main__":
 
     
     moe = MoE(4)
-    moe.fit(X, y, threshold_samples=0.5, local_mode = False)
+    moe.fit(X, y, threshold_samples=.7, local_mode = True)
     
     
-
-
-
-
     
-    
+        
