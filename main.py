@@ -67,34 +67,30 @@ class MoE():
         
         # clustering
         labels_sample, labels_valid, kmeans = self.__clustering(self.n_experts, sampled_data, valid_data)
-        print(type(labels_sample))
         
         # distribution of probability mass after clustering
         threshold_samples_count = int(n_samples * threshold_samples)
         prob_dist_train = self.__prob_mass_cluster(self.n_experts, labels_sample, threshold_samples_count)
         if labels_valid is not None:
             prob_dist_valid = self.__prob_mass_cluster(self.n_experts, labels_valid)
-        print(prob_dist_train) 
-        
-        
-        # Search the local Mode Value for dominante Cluster
-        if local_mode == True:
-             train_data_local_mode =  self.__local_cluster_mode(train_data, prob_dist_train, kmeans)
-             # Load lodal Mode Train set
-             train_dataset_experts_local = CustomDataset(train_data_local_mode, train_target)
-             train_loader_experts_local = DataLoader(train_dataset_experts_local, batch_size_experts)
             
-        # Load Global Mode Train und Validation Set for Training of Experts 
-        train_dataset_experts = CustomDataset(train_data.mode(), train_target)
-        train_loader_experts = DataLoader(train_dataset_experts, batch_size_experts)
+        
+        # Search the local Mode Value for dominante Cluster and order every instance to the coresponding expert
+        if local_mode == True:
+             train_data_local =  self.__local_cluster_mode(train_data, prob_dist_train, kmeans)
+             train_loader_list_experts_local = self.___divide_dataset_for_experts(train_data_local, train_target, prob_dist_train, self.n_experts, batch_size = batch_size_experts)
+        else:
+            train_loader_list_experts_global = self.___divide_dataset_for_experts(train_data.mode(), train_target, prob_dist_train, self.n_experts, batch_size = batch_size_experts)
+        
+        # Divide Validation Data for experts
         if valid_data is not None:
-            valid_dataset_experts = CustomDataset(valid_data.mode(), valid_target)
-            valid_loader_experts = DataLoader(valid_dataset_experts, batch_size_experts)
+            valid_loader_list_experts_global = self.___divide_dataset_for_experts(valid_data.mode(), valid_target, prob_dist_valid, self.n_experts, batch_size = batch_size_experts)
         else:
             valid_loader_experts = None
-        
+            
+
         # Get Information about Prediction Task
-        task, output_size = self.__get_task_type(np.array(train_target))
+        task, input_size, output_size = self.__get_task_type(train_data, np.array(train_target))
         # binary classification
         if task == 1:
               loss_fn = nn.BCELoss() 
@@ -105,22 +101,26 @@ class MoE():
         elif task == 3:
             loss_fn = nn.MSELoss()
             
-        # Train Experts    
-        experts = Custom_nn(train_loader_experts, output_size)
-        optimizer = optim.Adam(experts.parameters(), lr=lr)
-        experts.train(train_loader_experts, valid_loader_experts, prob_dist_train, n_epochs, optimizer, loss_fn, weighted_experts)   
+        # Train Experts   
         
-        #Mode 
-        train_data.mode()
-
-
-        train_data.ev()        
-        
-        #train experts 
+        for expert in range(self.n_experts):
+            experts = Custom_nn(input_size, output_size)
+            optimizer = optim.Adam(experts.parameters(), lr=lr)
+            train_loader_expert = train_loader_list_experts_local[expert]
+            experts.train(train_loader_expert, valid_loader_experts, prob_dist_train, n_epochs, optimizer, loss_fn, weighted_experts)   
+            
         
         
-        #train gate 
+        # Train Gate
         
+        # Load Global Mode Train und Validation Set for Training of Gate
+        train_dataset_gate_global = CustomDataset(train_data.mode(), train_target)
+        train_loader_gate_global = DataLoader(train_dataset_gate_global, batch_size = batch_size_gate)
+        if valid_data is not None:
+            valid_dataset_gate = CustomDataset(valid_data.mode(), valid_target)
+            valid_loader_gate = DataLoader(valid_dataset_gate, batch_size = batch_size_gate)
+        else:
+            valid_loader_gate = None
         
         pass
         
@@ -149,7 +149,7 @@ class MoE():
         Ouput: labels of Clustering (array)
         """
         cluster_distribution = np.empty(())
-        kmeans = KMeans(n_clusters = n_experts).fit(sampled_data)
+        kmeans = KMeans(n_clusters = n_experts, random_state = 1).fit(sampled_data)
         labels_sample = kmeans.labels_
         if valid_data is not None:
             labels_valid = kmeans.predict(valid_data.mode())
@@ -184,7 +184,7 @@ class MoE():
         centroids = kmeans.cluster_centers_
         data_local_mode = data.mode().copy()
         dominant_cluster = np.argmax(prob_dist, axis=1)
-        for i, instance in tqdm(enumerate(data_local_mode), total=len(data_local_mode), desc="Search Local Cluster Mode..."):
+        for i, instance in tqdm(enumerate(data_local_mode), total=len(data_local_mode), desc="Search Local Cluster Mode"):
             missing_dims = data.data[i].indices[1]
             cluster = dominant_cluster[i]
             if len(missing_dims) > 0:
@@ -223,26 +223,50 @@ class MoE():
           
         return data_local_mode
         
-    def __get_task_type(self, y):
+    def __get_task_type(self, X, y):
         """
-        Function: get the predictions task type, as well as the output size
+        Function: get the predictions task type, as well as the output size and the input size
         """
         num_unique_values = len(np.unique(y))
+        input_size = X.data.mode().shape[1]
         # binary classification
         if num_unique_values == 2:
-            return 1, num_unique_values
+            return 1, input_size, num_unique_values 
         # multiclass classification
         elif num_unique_values > 2 and num_unique_values <= 20:
-            return 2, num_unique_values
+            return 2, input_size, num_unique_values
         # regression
         else:
-            return 3, 1
+            return 3, input_size, 1
         
         
         
         
         
-        pass
+    def __divide_dataset_for_experts(self, X, y, prob_dist, n_experts, batch_size):
+        """
+        Function: Divides Dataset for Expert - Every Expert gets Instance, where most of the prob. Mass lies in
+        Input: X (data), y(target), prob_dist(Distribution of Prob. Mass after Clustering of Samples), n_experts (number of experts)
+        Output: data (list with dataloaders for every expert)
+        """
+        dominant_cluster = np.argmax(prob_dist, axis=1)
+        data = []
+        for i in range(n_experts):
+            indices = np.where(dominant_cluster == i)
+            X = X[indices]
+            y = y[indices]
+            dataset_expert = CustomDataset(X, y)
+            loader_expert = DataLoader(dataset_expert, batch_size)
+            data.append(loader_expert)
+        return data
+            
+
+            
+            
+               
+               
+               
+        
         
             
     def _init_model(self):
@@ -423,8 +447,5 @@ if __name__ == "__main__":
 
     
     moe = MoE(4)
-    moe.fit(X, y, threshold_samples=.7, local_mode = True)
+    moe.fit(X, y, threshold_samples=.5, local_mode = True)
     
-    
-    
-        
