@@ -64,7 +64,6 @@ class MoE():
         # sampling of KDE and Restriction of samples
         sampled_data = train_data.sample(n_samples,seed = 1)
         sampled_data = self.__threshold_sampling(sampled_data, n_samples, threshold_samples)
-        
         # clustering
         labels_sample, labels_valid, kmeans = self.__clustering(self.n_experts, sampled_data, valid_data)
         
@@ -78,13 +77,14 @@ class MoE():
         # Search the local Mode Value for dominante Cluster and order every instance to the coresponding expert
         if local_mode == True:
              train_data_local =  self.__local_cluster_mode(train_data, prob_dist_train, kmeans)
-             train_loader_list_experts_local = self.___divide_dataset_for_experts(train_data_local, train_target, prob_dist_train, self.n_experts, batch_size = batch_size_experts)
+             print(train_data_local[0])
+             train_loader_list_experts_local = self.__divide_dataset_for_experts(train_data_local, train_target, prob_dist_train, self.n_experts, batch_size = batch_size_experts)
         else:
-            train_loader_list_experts_global = self.___divide_dataset_for_experts(train_data.mode(), train_target, prob_dist_train, self.n_experts, batch_size = batch_size_experts)
+            train_loader_list_experts_global = self.__divide_dataset_for_experts(train_data.mode(), train_target, prob_dist_train, self.n_experts, batch_size = batch_size_experts)
         
         # Divide Validation Data for experts
         if valid_data is not None:
-            valid_loader_list_experts_global = self.___divide_dataset_for_experts(valid_data.mode(), valid_target, prob_dist_valid, self.n_experts, batch_size = batch_size_experts)
+            valid_loader_list_experts_global = self.__divide_dataset_for_experts(valid_data.mode(), valid_target, prob_dist_valid, self.n_experts, batch_size = batch_size_experts)
         else:
             valid_loader_experts = None
             
@@ -102,13 +102,13 @@ class MoE():
             loss_fn = nn.MSELoss()
             
         # Train Experts   
-        
-        for expert in range(self.n_experts):
-            experts = Custom_nn(input_size, output_size)
-            optimizer = optim.Adam(experts.parameters(), lr=lr)
-            train_loader_expert = train_loader_list_experts_local[expert]
-            experts.train(train_loader_expert, valid_loader_experts, prob_dist_train, n_epochs, optimizer, loss_fn, weighted_experts)   
-            
+        trained_experts = []
+        for i in range(self.n_experts):
+            expert = Custom_nn(input_size, output_size)
+            optimizer = optim.Adam(expert.parameters(), lr=lr)
+            train_loader_expert = train_loader_list_experts_local[i]
+            expert.train(train_loader_expert, valid_loader_experts, prob_dist_train, n_epochs, optimizer, loss_fn, weighted_experts)   
+            trained_experts.append(expert)
         
         
         # Train Gate
@@ -149,7 +149,7 @@ class MoE():
         Ouput: labels of Clustering (array)
         """
         cluster_distribution = np.empty(())
-        kmeans = KMeans(n_clusters = n_experts, random_state = 1).fit(sampled_data)
+        kmeans = KMeans(n_init = 10, n_clusters = n_experts, random_state = 1).fit(sampled_data)
         labels_sample = kmeans.labels_
         if valid_data is not None:
             labels_valid = kmeans.predict(valid_data.mode())
@@ -189,6 +189,7 @@ class MoE():
             cluster = dominant_cluster[i]
             if len(missing_dims) > 0:
                 instance = data_local_mode[i].copy()
+                print(instance)
                 # get kde for instance
                 kde = data.data[i].continuous
                 # Calculate Mode value per Cluster
@@ -216,10 +217,14 @@ class MoE():
 
                 optimize_modal = basinhopping(lambda x: objective_function(x, cluster, kde, instance, missing_dims, centroids), x0=cluster_centers, minimizer_kwargs=minimizer_kwargs, niter=15, stepsize=0.2)                                    
                 modal_values = optimize_modal.x.tolist()
+                print(modal_values)
                 # print(instance)
                 for i, modal_value in zip(missing_dims, modal_values):
                     instance[i] = modal_value
+                print(instance)
                 data_local_mode[i] = instance
+                # data_local_mode[i][:] = instance
+                break
           
         return data_local_mode
         
@@ -228,7 +233,7 @@ class MoE():
         Function: get the predictions task type, as well as the output size and the input size
         """
         num_unique_values = len(np.unique(y))
-        input_size = X.data.mode().shape[1]
+        input_size = X.mode().shape[1]
         # binary classification
         if num_unique_values == 2:
             return 1, input_size, num_unique_values 
@@ -238,9 +243,6 @@ class MoE():
         # regression
         else:
             return 3, input_size, 1
-        
-        
-        
         
         
     def __divide_dataset_for_experts(self, X, y, prob_dist, n_experts, batch_size):
@@ -253,20 +255,14 @@ class MoE():
         data = []
         for i in range(n_experts):
             indices = np.where(dominant_cluster == i)
-            X = X[indices]
-            y = y[indices]
-            dataset_expert = CustomDataset(X, y)
+            X_exp = X[indices]
+            y_exp = y[indices]
+            dataset_expert = CustomDataset(X_exp, y_exp)
             loader_expert = DataLoader(dataset_expert, batch_size)
             data.append(loader_expert)
         return data
             
 
-            
-            
-               
-               
-               
-        
         
             
     def _init_model(self):
@@ -442,10 +438,10 @@ if __name__ == "__main__":
 
     #uncertainty in data 
     X = uf.uframe_from_array_mice(X_true, kernel = "gaussian" , p =.5, mice_iterations = 2)
-    X.analysis(X_true, save= "filename", bins = 20)
+    # X.analysis(X_true, save= "filename", bins = 20)
     
 
     
     moe = MoE(4)
-    moe.fit(X, y, threshold_samples=.5, local_mode = True)
+    moe.fit(X, y, threshold_samples=1, local_mode = True)
     
