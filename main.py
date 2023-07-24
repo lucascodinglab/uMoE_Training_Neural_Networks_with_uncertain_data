@@ -68,17 +68,16 @@ class MoE():
         self.verbose = verbose
         
         # Get Information about Prediction Task
-        task, input_size, output_size = self.__get_task_type(train_data, np.array(train_target))
+        self.task, input_size, output_size = self.__get_task_type(train_data, np.array(train_target))
         # binary classification
-        if task == 1:
+        if self.task == 1:
             loss_fn = nn.BCELoss(reduction = "none") 
         # multi class classification
-        elif task == 2:
+        elif self.task == 2:
             loss_fn = nn.CrossEntropyLoss(reduction = "none")
         # regression
-        elif task == 3:
+        elif self.task == 3:
             loss_fn = nn.MSELoss()
-        print(task)
         # sampling of KDE and Restriction of samples
         # sampled_data = train_data.sample(n_samples,seed = seed, threshold = threshold_samples)
         sampled_data = train_data.sample(n_samples,seed = seed)
@@ -98,18 +97,18 @@ class MoE():
         # Search the local Mode Value for dominante Cluster and order every instance to the coresponding expert
         if local_mode == True:
              train_data_local =  self.__local_cluster_mode(train_data, prob_dist_train)
-             print(train_data_local[0])
-             train_loader_list_experts_local = self.__divide_dataset_for_experts(train_data_local, train_target, prob_dist_train, self.n_experts, batch_size = batch_size_experts, weighted_experts = weighted_experts, task = task)
+             train_loader_list_experts_local = self.__divide_dataset_for_experts(train_data_local, train_target, prob_dist_train, self.n_experts, batch_size = batch_size_experts, weighted_experts = weighted_experts)
         else:
-            train_loader_list_experts_global = self.__divide_dataset_for_experts(train_data.mode(), train_target, prob_dist_train, self.n_experts, batch_size = batch_size_experts, weighted_experts = weighted_experts, task = task)
+            train_loader_list_experts_global = self.__divide_dataset_for_experts(train_data.mode(), train_target, prob_dist_train, self.n_experts, batch_size = batch_size_experts, weighted_experts = weighted_experts)
         
         # Validation Data 
         if valid_data is not None:
             labels_valid = self.pred_clusters(valid_data.mode())
             prob_dist_valid = self.__prob_mass_cluster(self.n_experts, labels_valid)
-        
+        else:
+            prob_dist_valid = None
         if valid_data is not None:
-            valid_loader_list_experts_global = self.__divide_dataset_for_experts(valid_data.mode(), valid_target, prob_dist_valid, self.n_experts, batch_size = batch_size_experts, weighted_experts = None, task = task)
+            valid_loader_list_experts_global = self.__divide_dataset_for_experts(valid_data.mode(), valid_target, prob_dist_valid, self.n_experts, batch_size = batch_size_experts, weighted_experts = None)
         else:
             valid_loader_list_experts_global = [None] * self.n_experts
             
@@ -124,14 +123,9 @@ class MoE():
         # Train Gate
         
         # Load Global Mode Train und Validation Set for Training of Gate
-        train_dataset_gate_global = CustomDataset(train_data.mode(), train_target)
-        train_loader_gate_global = DataLoader(train_dataset_gate_global, batch_size = batch_size_gate)
-        if valid_data is not None:
-            valid_dataset_gate = CustomDataset(valid_data.mode(), valid_target)
-            valid_loader_gate = DataLoader(valid_dataset_gate, batch_size = batch_size_gate)
-        else:
-            valid_loader_gate = None
+        train_loader_gate, valid_loader_gate = self.__datasets_for_gate(train_data.mode(), train_target, prob_dist_train, valid_data, valid_target, prob_dist_valid, batch_size = batch_size_gate, weighted_gate = weighted_gate)
         
+        print("finished")
         pass
         
     
@@ -231,7 +225,7 @@ class MoE():
             return 3, input_size, 1
         
         
-    def __divide_dataset_for_experts(self, X, y, prob_dist, n_experts, batch_size, weighted_experts, task):
+    def __divide_dataset_for_experts(self, X, y, prob_dist, n_experts, batch_size, weighted_experts):
         """
         Function: Divides Dataset for Expert - Every Expert gets Instance, where most of the prob. Mass lies in
         Input: X (data), y(target), prob_dist(Distribution of Prob. Mass after Clustering of Samples), n_experts (number of experts)
@@ -245,18 +239,41 @@ class MoE():
             y_exp = y[indices]
             
             if weighted_experts is False: 
-                weights  = np.repeat(1, len(indices))
+                weights  = np.repeat(1, len(indices)).tolist()
             else: 
                 weights_exp = prob_dist[indices]
                 weights = np.max(weights_exp, axis=1).tolist()
-            dataset_expert = CustomDataset(X_exp, y_exp, weights, task)
+            dataset_expert = CustomDataset(X_exp, y_exp, weights, self.task)
             loader_expert = DataLoader(dataset_expert, batch_size)
             data.append(loader_expert)
         return data
             
 
         
-            
+    def __datasets_for_gate(self, train_data, train_target, prob_train, valid_data, valid_target, prob_valid, batch_size, weighted_gate):
+        """
+        Function: Preprocessing Data for Gate Unit
+        Output: train and validation data for Gate
+        """
+        if weighted_gate is False: 
+            weights  = np.repeat(1, len(train_target)).tolist()
+        else: 
+            weights = np.max(prob_train, axis=1).tolist()
+        # train
+        print(weights)
+        train_data_and_dist = np.concatenate((train_data, prob_train), axis=1)
+        train_dataset_gate = CustomDataset(train_data_and_dist, train_target, weights, self.task)
+        train_loader_gate = DataLoader(train_dataset_gate, batch_size)
+        if valid_data is not None:
+            # valid
+            valid_data_and_dist = np.concatenate((valid_data.mode(), prob_valid), axis=1)
+            valid_dataset_gate = CustomDataset(valid_data_and_dist, valid_target, weights, self.task)
+            valid_loader_gate = DataLoader(valid_dataset_gate, batch_size)
+            return train_loader_gate, valid_loader_gate
+        else:
+            return train_loader_gate, None
+        
+        
     def _init_model(self):
     
         output_experts = self.inputsize if not self.probs_to_gate else self.inputsize + self.n_experts
@@ -267,7 +284,7 @@ class MoE():
     
 class CustomDataset(Dataset):
     """
-    Custom Dataset Class, which is able to process U-Frame instances
+    Custom Dataset Class, which is able to process X, y and the weights of the instances
     """
     def __init__(self, X, y, weights = None, task = None):
         
