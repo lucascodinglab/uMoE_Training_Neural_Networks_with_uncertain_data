@@ -65,9 +65,24 @@ class MoE():
             threshold_samples = .5, weighted_experts = True, 
             weighted_gate = False, verbose = False, seed = None): 
         self.train_data = train_data
-
+        self.verbose = verbose
+        
+        # Get Information about Prediction Task
+        task, input_size, output_size = self.__get_task_type(train_data, np.array(train_target))
+        # binary classification
+        if task == 1:
+            loss_fn = nn.BCELoss(reduction = "none") 
+        # multi class classification
+        elif task == 2:
+            loss_fn = nn.CrossEntropyLoss(reduction = "none")
+        # regression
+        elif task == 3:
+            loss_fn = nn.MSELoss()
+        print(task)
         # sampling of KDE and Restriction of samples
-        sampled_data = train_data.sample(n_samples,seed = seed, threshold = threshold_samples)
+        # sampled_data = train_data.sample(n_samples,seed = seed, threshold = threshold_samples)
+        sampled_data = train_data.sample(n_samples,seed = seed)
+
         # clustering
         self.__clustering(self.n_experts, sampled_data)
         
@@ -84,9 +99,9 @@ class MoE():
         if local_mode == True:
              train_data_local =  self.__local_cluster_mode(train_data, prob_dist_train)
              print(train_data_local[0])
-             train_loader_list_experts_local = self.__divide_dataset_for_experts(train_data_local, train_target, prob_dist_train, self.n_experts, batch_size = batch_size_experts, weighted_experts = weighted_experts)
+             train_loader_list_experts_local = self.__divide_dataset_for_experts(train_data_local, train_target, prob_dist_train, self.n_experts, batch_size = batch_size_experts, weighted_experts = weighted_experts, task = task)
         else:
-            train_loader_list_experts_global = self.__divide_dataset_for_experts(train_data.mode(), train_target, prob_dist_train, self.n_experts, batch_size = batch_size_experts, weighted_experts = weighted_experts)
+            train_loader_list_experts_global = self.__divide_dataset_for_experts(train_data.mode(), train_target, prob_dist_train, self.n_experts, batch_size = batch_size_experts, weighted_experts = weighted_experts, task = task)
         
         # Validation Data 
         if valid_data is not None:
@@ -94,26 +109,16 @@ class MoE():
             prob_dist_valid = self.__prob_mass_cluster(self.n_experts, labels_valid)
         
         if valid_data is not None:
-            valid_loader_list_experts_global = self.__divide_dataset_for_experts(valid_data.mode(), valid_target, prob_dist_valid, self.n_experts, batch_size = batch_size_experts, weighted_experts = None)
+            valid_loader_list_experts_global = self.__divide_dataset_for_experts(valid_data.mode(), valid_target, prob_dist_valid, self.n_experts, batch_size = batch_size_experts, weighted_experts = None, task = task)
         else:
             valid_loader_list_experts_global = [None] * self.n_experts
             
-
-        # Get Information about Prediction Task
-        task, input_size, output_size = self.__get_task_type(train_data, np.array(train_target))
-        # binary classification
-        if task == 1:
-              loss_fn = nn.BCELoss(reduction = None) 
-        # multi class classification
-        elif task == 2:
-            loss_fn = nn.CrossEntropyLoss(reduction = None)
-        # regression
-        elif task == 3:
-            loss_fn = nn.MSELoss(reduction = None)
             
         # Train Experts   
         for i in range(self.n_experts):
-            self.experts[i].train_model(train_loader_list_experts_local[i], valid_loader_list_experts_global[i], prob_dist_train, n_epochs, loss_fn, weighted_experts, lr = lr)   
+            self.experts[i].train_model(train_loader = train_loader_list_experts_local[i], valid_loader = valid_loader_list_experts_global[i],
+                                        prob_dist_train = prob_dist_train, n_epochs = n_epochs, loss_fn = loss_fn, weighted_loss = weighted_experts, 
+                                        lr = lr, reg_alpha = reg_alpha, reg_lambda = reg_lambda, verbose = self.verbose)   
         
         
         # Train Gate
@@ -178,7 +183,6 @@ class MoE():
             cluster = dominant_cluster[i]
             if len(missing_dims) > 0:
                 instance = data_local_mode[i].copy()
-                print(instance)
                 # get kde for instance
                 # Calculate Mode value per Cluster
                 minimizer_kwargs = {
@@ -205,14 +209,9 @@ class MoE():
 
                 optimize_modal = basinhopping(lambda x: objective_function(x = x, cluster = cluster, kde = data.data[i], instance = instance, missing_dims = missing_dims, centroids = self.kmeans.cluster_centers_), x0=cluster_centers, minimizer_kwargs=minimizer_kwargs, niter=15, stepsize=0.2)                                    
                 modal_values = optimize_modal.x.tolist()
-                print(modal_values)
                 # print(instance)
-                for i, modal_value in zip(missing_dims, modal_values):
-                    instance[i] = modal_value
-                print(instance)
-                data_local_mode[i] = instance
-                # data_local_mode[i][:] = instance
-                
+                for dim, modal_value in zip(missing_dims, modal_values):
+                    data_local_mode[i][dim] = modal_value
         return data_local_mode
         
     def __get_task_type(self, X, y):
@@ -232,7 +231,7 @@ class MoE():
             return 3, input_size, 1
         
         
-    def __divide_dataset_for_experts(self, X, y, prob_dist, n_experts, batch_size, weighted_experts):
+    def __divide_dataset_for_experts(self, X, y, prob_dist, n_experts, batch_size, weighted_experts, task):
         """
         Function: Divides Dataset for Expert - Every Expert gets Instance, where most of the prob. Mass lies in
         Input: X (data), y(target), prob_dist(Distribution of Prob. Mass after Clustering of Samples), n_experts (number of experts)
@@ -245,13 +244,12 @@ class MoE():
             X_exp = X[indices]
             y_exp = y[indices]
             
-            if weighted_experts is None: 
+            if weighted_experts is False: 
                 weights  = np.repeat(1, len(indices))
             else: 
-                weights = [prob_dist[k].max() for k in indices]
-            
-            
-            dataset_expert = CustomDataset(X_exp, y_exp, weights)
+                weights_exp = prob_dist[indices]
+                weights = np.max(weights_exp, axis=1).tolist()
+            dataset_expert = CustomDataset(X_exp, y_exp, weights, task)
             loader_expert = DataLoader(dataset_expert, batch_size)
             data.append(loader_expert)
         return data
@@ -271,19 +269,21 @@ class CustomDataset(Dataset):
     """
     Custom Dataset Class, which is able to process U-Frame instances
     """
-    def __init__(self, X, y, weights = None):
-        
+    def __init__(self, X, y, weights = None, task = None):
         
         #to torch tensors
-        self.X = X
-        self.y = y 
+        self.X = torch.tensor(X, dtype=torch.float64)
+        if task == 1 or 2:
+            self.y = torch.tensor(y, dtype=torch.long)
+        else:
+            self.y = torch.tensor(y, dtype=torch.float64)
             
         #if None all = 1
         
         if weights == None: 
-            self.weights = torch.Tensor.repeat(torch.Tensor([1]), len(self.y))
+            self.weights = torch.Tensor.repeat(torch.Tensor([1]), len(self.y), dtype=torch.float64)
         else:
-            self.weights = weights
+            self.weights = torch.tensor(weights, dtype=torch.float64)
         
         
     def __len__(self):
@@ -365,29 +365,42 @@ class Custom_nn(nn.Module):
         if self.task == 'multiclass': 
             return torch.nn.Softmax(self.stacked_layers(x))
 
+    # def l1_loss(self, w):
+    #     return torch.abs(w).sum()
     
-    def train_model(self, train_loader, valid_loader, prob_dist_train, n_epochs, loss_fn, weighted_loss, lr):
+    # def l2_loss(self, w):
+    #     return torch.square(w).sum()
+    
+    def train_model(self, train_loader, valid_loader, prob_dist_train, n_epochs, loss_fn, weighted_loss, lr, reg_alpha, reg_lambda, verbose):
         best_score = np.inf
         best_weights = None
         history = []
         optimizer = torch.optim.Adam(self.parameters(), lr = lr)
         for epoch in range(n_epochs):
             self.train()
-            print(epoch)
             for i, data in enumerate(train_loader):
                 
-                print(i)
                 X_batch, y_batch, weights_batch = data
-            
+                # Convert input data to the same data type as the model's weights
+                y_batch = y_batch.to(torch.float64)  
+                 
                 optimizer.zero_grad()
 
-                # X_batch und y_batch werden bereits als Tensoren geliefert
                 y_pred = self(X_batch)
                 loss = loss_fn(y_pred, y_batch)
                 loss = torch.mean(loss * weights_batch)
                 
-                l2_loss = self.l2_loss()  # Annahme: self.l2_loss() ist eine Methode, die den L2-Verlust berechnet
-                loss += l2_loss
+                # Elastic Net regularization (L1 + L2)
+                l1_regularization = torch.tensor(0., dtype=torch.float64)
+                for param in self.parameters():
+                    l1_regularization += torch.norm(param, p=1)
+    
+                l2_regularization = torch.tensor(0., dtype=torch.float64)
+                for param in self.parameters():
+                    l2_regularization += torch.norm(param, p=2)
+    
+                loss += reg_lambda * (reg_alpha * l1_regularization + (1 - reg_alpha) * l2_regularization) 
+
                 
                 loss.backward()
                 optimizer.step()
@@ -395,6 +408,7 @@ class Custom_nn(nn.Module):
                        
         
             # Validation is optional
+            loss_val = None
             if valid_loader is not None:
                 self.eval()
                 with torch.no_grad():
@@ -409,16 +423,16 @@ class Custom_nn(nn.Module):
                     y_targets = torch.cat(y_targets, dim=0)
     
     
-                    mse = loss_fn(y_preds, y_targets)
-                    mse = float(mse.numpy())
-                    if epoch % 5 == 0:
-                        print(mse)
-                    history.append(mse)
-                    if mse < best_score:
-                        best_score = mse
+                    loss_val = loss_fn(y_preds, y_targets)
+                    loss_val = float(loss_val.numpy())
+                    history.append(loss_val)
+                    if loss_val < best_score:
+                        best_score = loss_val
                         best_weights = copy.deepcopy(self.state_dict())
-    
-        self.load_state_dict(best_weights)
+            if (verbose == True) and (epoch % 5 == 0):
+                print(f"Epoch: {epoch}, Train_Loss: {loss}, Val_Loss: {loss_val}")
+        if valid_loader is not None:
+            self.load_state_dict(best_weights)
         return history, best_score
         
 
@@ -461,6 +475,8 @@ if __name__ == "__main__":
     
 
     
-    moe = MoE(4)
-    moe.fit(X, y, threshold_samples=1, local_mode = True)
+    moe = MoE(4, inputsize=8, outputsize=1)
+    moe.fit(X, y, threshold_samples=1, local_mode = True, weighted_experts=True, verbose=True)
+    
+
     
