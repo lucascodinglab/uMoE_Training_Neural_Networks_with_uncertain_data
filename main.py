@@ -38,7 +38,7 @@ class MoE():
     """
 
     # Ignore RuntimeWarnings
-    warnings.filterwarnings("ignore", category=RuntimeWarning)
+    warnings.filterwarnings("ignore", category = RuntimeWarning)
     def __init__(self, n_experts, hidden_experts = [64,64], hidden_gate = [64,64], dropout = 0, inputsize = 1, outputsize = 1, probs_to_gate = True) : 
     
         self.n_experts = n_experts 
@@ -58,57 +58,62 @@ class MoE():
         pass
         
     
-    def fit(self, train_data, train_target, valid_data = None, valid_target = None, reg_alpha = 0.5, reg_lambda = 0.0003, lr = 0.001, n_epochs = 100, batch_size_experts = 4, batch_size_gate = 8, local_mode = True, n_samples = 100, threshold_samples = .5, weighted_experts = True, weighted_gate = False, verbose = False ): 
+    def fit(self, train_data, train_target, valid_data = None, 
+            valid_target = None, reg_alpha = 0.5, reg_lambda = 0.0003, 
+            lr = 0.001, n_epochs = 100, batch_size_experts = 4, 
+            batch_size_gate = 8, local_mode = True, n_samples = 100, 
+            threshold_samples = .5, weighted_experts = True, 
+            weighted_gate = False, verbose = False, seed = None): 
         self.train_data = train_data
 
         # sampling of KDE and Restriction of samples
-        sampled_data = train_data.sample(n_samples,seed = 1)
-        sampled_data = self.__threshold_sampling(sampled_data, n_samples, threshold_samples)
+        sampled_data = train_data.sample(n_samples,seed = seed, threshold = threshold_samples)
         # clustering
-        labels_sample, labels_valid, kmeans = self.__clustering(self.n_experts, sampled_data, valid_data)
+        self.__clustering(self.n_experts, sampled_data)
         
+        
+        labels_sample = self.pred_clusters(sampled_data)
+
+
         # distribution of probability mass after clustering
-        threshold_samples_count = int(n_samples * threshold_samples)
-        prob_dist_train = self.__prob_mass_cluster(self.n_experts, labels_sample, threshold_samples_count)
-        if labels_valid is not None:
-            prob_dist_valid = self.__prob_mass_cluster(self.n_experts, labels_valid)
+        prob_dist_train = self.__prob_mass_cluster(self.n_experts, labels_sample,  int(n_samples * threshold_samples))
+        
             
         
         # Search the local Mode Value for dominante Cluster and order every instance to the coresponding expert
         if local_mode == True:
-             train_data_local =  self.__local_cluster_mode(train_data, prob_dist_train, kmeans)
+             train_data_local =  self.__local_cluster_mode(train_data, prob_dist_train)
              print(train_data_local[0])
-             train_loader_list_experts_local = self.__divide_dataset_for_experts(train_data_local, train_target, prob_dist_train, self.n_experts, batch_size = batch_size_experts)
+             train_loader_list_experts_local = self.__divide_dataset_for_experts(train_data_local, train_target, prob_dist_train, self.n_experts, batch_size = batch_size_experts, weighted_experts = weighted_experts)
         else:
-            train_loader_list_experts_global = self.__divide_dataset_for_experts(train_data.mode(), train_target, prob_dist_train, self.n_experts, batch_size = batch_size_experts)
+            train_loader_list_experts_global = self.__divide_dataset_for_experts(train_data.mode(), train_target, prob_dist_train, self.n_experts, batch_size = batch_size_experts, weighted_experts = weighted_experts)
         
-        # Divide Validation Data for experts
+        # Validation Data 
         if valid_data is not None:
-            valid_loader_list_experts_global = self.__divide_dataset_for_experts(valid_data.mode(), valid_target, prob_dist_valid, self.n_experts, batch_size = batch_size_experts)
+            labels_valid = self.pred_clusters(valid_data.mode())
+            prob_dist_valid = self.__prob_mass_cluster(self.n_experts, labels_valid)
+        
+        if valid_data is not None:
+            valid_loader_list_experts_global = self.__divide_dataset_for_experts(valid_data.mode(), valid_target, prob_dist_valid, self.n_experts, batch_size = batch_size_experts, weighted_experts = None)
         else:
-            valid_loader_experts = None
+            valid_loader_list_experts_global = [None] * self.n_experts
             
 
         # Get Information about Prediction Task
         task, input_size, output_size = self.__get_task_type(train_data, np.array(train_target))
         # binary classification
         if task == 1:
-              loss_fn = nn.BCELoss() 
+              loss_fn = nn.BCELoss(reduction = None) 
         # multi class classification
         elif task == 2:
-            loss_fn = nn.CrossEntropyLoss()
+            loss_fn = nn.CrossEntropyLoss(reduction = None)
         # regression
         elif task == 3:
-            loss_fn = nn.MSELoss()
+            loss_fn = nn.MSELoss(reduction = None)
             
         # Train Experts   
-        trained_experts = []
         for i in range(self.n_experts):
-            expert = Custom_nn(input_size, output_size)
-            optimizer = optim.Adam(expert.parameters(), lr=lr)
-            train_loader_expert = train_loader_list_experts_local[i]
-            expert.train(train_loader_expert, valid_loader_experts, prob_dist_train, n_epochs, optimizer, loss_fn, weighted_experts)   
-            trained_experts.append(expert)
+            self.experts[i].train_model(train_loader_list_experts_local[i], valid_loader_list_experts_global[i], prob_dist_train, n_epochs, loss_fn, weighted_experts, lr = lr)   
         
         
         # Train Gate
@@ -124,38 +129,23 @@ class MoE():
         
         pass
         
-    def __threshold_sampling(self, sampled_data, n_samples, threshold_samples):
-        if threshold_samples <1: 
-            ind=[]
-            n_choosen = round(n_samples * threshold_samples)
-            
-            for i in range(len(self.train_data)): 
-                pdfs = self.train_data.data[i].pdf(sampled_data[i*n_samples:(i+1)*n_samples,:])
-                sort_ind = np.argsort(pdfs, axis = 0)
-
-                sort_ind = np.squeeze(sort_ind[:])
-                sort_ind = sort_ind[sort_ind < n_choosen]
-
-                ind.append(sort_ind+(i*n_samples))
-                
-            sampled_data = sampled_data[np.concatenate(ind, axis = 0 ),]                
-                
-        return sampled_data
     
-    def __clustering(self, n_experts, sampled_data, valid_data):
+    def __clustering(self, n_experts, sampled_data):
         """
         Function: Clustering of samples to decompose the input space for the experts
         Input: n_experts (size of cluster), sampled_data (samples of Train Data), Valid_data
         Ouput: labels of Clustering (array)
         """
         cluster_distribution = np.empty(())
-        kmeans = KMeans(n_init = 10, n_clusters = n_experts, random_state = 1).fit(sampled_data)
-        labels_sample = kmeans.labels_
-        if valid_data is not None:
-            labels_valid = kmeans.predict(valid_data.mode())
-            return labels_sample, labels_valid
-        else:
-            return labels_sample, None, kmeans
+        self.kmeans = KMeans(n_init = 10, n_clusters = n_experts, random_state = 1).fit(sampled_data)
+
+
+    def pred_clusters(self, newdata): 
+        return self.kmeans.predict(newdata)
+
+
+
+
             
     def __prob_mass_cluster(self, n_experts, labels, n_samples = 1):
         """
@@ -174,14 +164,13 @@ class MoE():
         return prob_dist
     
     
-    def __local_cluster_mode(self, data, prob_dist, kmeans):
+    def __local_cluster_mode(self, data, prob_dist):
         """
         Function: Maximize for every Instance the Mode value for the cluster, where the most prob. Mass lies
         Input: train_data, prob_dist(One-Hot_Encoded Prob. Distribution), kmeans (Clustering Instance fit on Samples)
         Output: local_mode_data
         """
-        n_clusters = prob_dist.shape[1]
-        centroids = kmeans.cluster_centers_
+        
         data_local_mode = data.mode().copy()
         dominant_cluster = np.argmax(prob_dist, axis=1)
         for i, instance in tqdm(enumerate(data_local_mode), total=len(data_local_mode), desc="Search Local Cluster Mode"):
@@ -191,12 +180,11 @@ class MoE():
                 instance = data_local_mode[i].copy()
                 print(instance)
                 # get kde for instance
-                kde = data.data[i].continuous
                 # Calculate Mode value per Cluster
                 minimizer_kwargs = {
                     'options': {'maxiter': 50}  # Limit the maximum number of iterations
                 }   
-                cluster_centers = np.take(kmeans.cluster_centers_[cluster], missing_dims)
+                cluster_centers = np.take(self.kmeans.cluster_centers_[cluster], missing_dims)
                 # print(cluster_centers)
                 def objective_function(x, cluster, kde, instance, missing_dims, centroids):
                     """
@@ -213,9 +201,9 @@ class MoE():
                     closest_cluster = np.argmin(distances)
                     # Find the closest point and get its cluster label
                     
-                    return -kde.score_samples(x.reshape(1,-1)) if closest_cluster == cluster else np.inf
+                    return -kde.pdf(inst.reshape(1,-1)) if closest_cluster == cluster else np.inf
 
-                optimize_modal = basinhopping(lambda x: objective_function(x, cluster, kde, instance, missing_dims, centroids), x0=cluster_centers, minimizer_kwargs=minimizer_kwargs, niter=15, stepsize=0.2)                                    
+                optimize_modal = basinhopping(lambda x: objective_function(x = x, cluster = cluster, kde = data.data[i], instance = instance, missing_dims = missing_dims, centroids = self.kmeans.cluster_centers_), x0=cluster_centers, minimizer_kwargs=minimizer_kwargs, niter=15, stepsize=0.2)                                    
                 modal_values = optimize_modal.x.tolist()
                 print(modal_values)
                 # print(instance)
@@ -224,8 +212,7 @@ class MoE():
                 print(instance)
                 data_local_mode[i] = instance
                 # data_local_mode[i][:] = instance
-                break
-          
+                
         return data_local_mode
         
     def __get_task_type(self, X, y):
@@ -245,7 +232,7 @@ class MoE():
             return 3, input_size, 1
         
         
-    def __divide_dataset_for_experts(self, X, y, prob_dist, n_experts, batch_size):
+    def __divide_dataset_for_experts(self, X, y, prob_dist, n_experts, batch_size, weighted_experts):
         """
         Function: Divides Dataset for Expert - Every Expert gets Instance, where most of the prob. Mass lies in
         Input: X (data), y(target), prob_dist(Distribution of Prob. Mass after Clustering of Samples), n_experts (number of experts)
@@ -257,7 +244,14 @@ class MoE():
             indices = np.where(dominant_cluster == i)
             X_exp = X[indices]
             y_exp = y[indices]
-            dataset_expert = CustomDataset(X_exp, y_exp)
+            
+            if weighted_experts is None: 
+                weights  = np.repeat(1, len(indices))
+            else: 
+                weights = [prob_dist[k].max() for k in indices]
+            
+            
+            dataset_expert = CustomDataset(X_exp, y_exp, weights)
             loader_expert = DataLoader(dataset_expert, batch_size)
             data.append(loader_expert)
         return data
@@ -277,13 +271,25 @@ class CustomDataset(Dataset):
     """
     Custom Dataset Class, which is able to process U-Frame instances
     """
-    def __init__(self, X, y):
-        data = np.concatenate((X,y),axis=1)
-        self.data = data
-    def __len__(self, data):
-        return len(self.data)
+    def __init__(self, X, y, weights = None):
+        
+        
+        #to torch tensors
+        self.X = X
+        self.y = y 
+            
+        #if None all = 1
+        
+        if weights == None: 
+            self.weights = torch.Tensor.repeat(torch.Tensor([1]), len(self.y))
+        else:
+            self.weights = weights
+        
+        
+    def __len__(self):
+        return len(self.y)
     def __getitem__(self, index):
-        return self.data[index]
+        return self.X[index], self.y[index], self.weights[index]
     
     
 
@@ -309,7 +315,7 @@ class Custom_nn(nn.Module):
    
 
     """
-    def __init__(self, inputs, outputs, hidden=[64,64], activation=nn.ReLU(), dropout=0):
+    def __init__(self, inputs, outputs, hidden=[64,64], activation=nn.ReLU(), dropout=0, task = None ):
         r"""
 
         Parameters
@@ -346,35 +352,47 @@ class Custom_nn(nn.Module):
 
         self.stacked_layers = nn.Sequential(*layer_list)
 
+        self.task = 'numeric' if task is None else task
+
+
     def forward(self, x):
-        return self.stacked_layers(x)
+        if self.task == 'numeric': 
+            return self.stacked_layers(x)
+        
+        if self.task == 'binary': 
+            return torch.sigmoid(self.stacked_layers(x))
+        
+        if self.task == 'multiclass': 
+            return torch.nn.Softmax(self.stacked_layers(x))
+
     
-    def train(self, train_loader, valid_loader, prob_dist_train, n_epochs, optimizer, loss_fn, weighted_loss):
+    def train_model(self, train_loader, valid_loader, prob_dist_train, n_epochs, loss_fn, weighted_loss, lr):
         best_score = np.inf
         best_weights = None
         history = []
-    
+        optimizer = torch.optim.Adam(self.parameters(), lr = lr)
         for epoch in range(n_epochs):
             self.train()
-            with tqdm(train_loader, unit="batch", mininterval=0, disable=True) as bar:
-                bar.set_description(f"Epoch {epoch}")
-                for X_batch, y_batch in bar:
-                    optimizer.zero_grad()
-    
-                    # X_batch und y_batch werden bereits als Tensoren geliefert
-                    y_pred = self(X_batch)
-                    loss = loss_fn(y_pred, y_batch)
-    
-                    l2_loss = self.l2_loss()  # Annahme: self.l2_loss() ist eine Methode, die den L2-Verlust berechnet
-                    loss += l2_loss
-                    
-                    if weighted_loss:
-                        loss = torch.mean(loss * weights_batch)
-                    loss.backward()
-                    optimizer.step()
-    
-                    bar.set_postfix(mse=float(loss))
-                        
+            print(epoch)
+            for i, data in enumerate(train_loader):
+                
+                print(i)
+                X_batch, y_batch, weights_batch = data
+            
+                optimizer.zero_grad()
+
+                # X_batch und y_batch werden bereits als Tensoren geliefert
+                y_pred = self(X_batch)
+                loss = loss_fn(y_pred, y_batch)
+                loss = torch.mean(loss * weights_batch)
+                
+                l2_loss = self.l2_loss()  # Annahme: self.l2_loss() ist eine Methode, die den L2-Verlust berechnet
+                loss += l2_loss
+                
+                loss.backward()
+                optimizer.step()
+
+                       
         
             # Validation is optional
             if valid_loader is not None:
@@ -390,13 +408,14 @@ class Custom_nn(nn.Module):
                     y_preds = torch.cat(y_preds, dim=0)
                     y_targets = torch.cat(y_targets, dim=0)
     
-                    mse = mean_squared_error(y_preds.cpu().numpy(), y_targets.cpu().numpy())
-                    mse = float(mse)
+    
+                    mse = loss_fn(y_preds, y_targets)
+                    mse = float(mse.numpy())
                     if epoch % 5 == 0:
                         print(mse)
                     history.append(mse)
                     if mse < best_score:
-                        best_sore = mse
+                        best_score = mse
                         best_weights = copy.deepcopy(self.state_dict())
     
         self.load_state_dict(best_weights)
@@ -437,7 +456,7 @@ if __name__ == "__main__":
     
 
     #uncertainty in data 
-    X = uf.uframe_from_array_mice(X_true, kernel = "gaussian" , p =.5, mice_iterations = 2)
+    X = uf.uframe_from_array_mice_2(X_true, kernel = "gaussian" , p =.5, mice_iterations = 2)
     # X.analysis(X_true, save= "filename", bins = 20)
     
 
