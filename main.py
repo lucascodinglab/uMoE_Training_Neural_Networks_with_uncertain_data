@@ -77,7 +77,7 @@ class MoE():
             loss_fn = nn.CrossEntropyLoss(reduction = "none")
         # regression
         elif self.task == 3:
-            loss_fn = nn.MSELoss()
+            loss_fn = nn.MSELoss(reduction = "none")
         # sampling of KDE and Restriction of samples
         # sampled_data = train_data.sample(n_samples,seed = seed, threshold = threshold_samples)
         sampled_data = train_data.sample(n_samples,seed = seed)
@@ -96,35 +96,40 @@ class MoE():
         
         # Search the local Mode Value for dominante Cluster and order every instance to the coresponding expert
         if local_mode == True:
+            # local mode
              train_data_local =  self.__local_cluster_mode(train_data, prob_dist_train)
-             train_loader_list_experts_local = self.__divide_dataset_for_experts(train_data_local, train_target, prob_dist_train, self.n_experts, batch_size = batch_size_experts, weighted_experts = weighted_experts)
+             train_loader_list_experts = self.__divide_dataset_for_experts(train_data_local, train_target, prob_dist_train, self.n_experts, batch_size = batch_size_experts, weighted_experts = weighted_experts)
         else:
-            train_loader_list_experts_global = self.__divide_dataset_for_experts(train_data.mode(), train_target, prob_dist_train, self.n_experts, batch_size = batch_size_experts, weighted_experts = weighted_experts)
+            # global mode
+            train_loader_list_experts = self.__divide_dataset_for_experts(train_data.mode(), train_target, prob_dist_train, self.n_experts, batch_size = batch_size_experts, weighted_experts = weighted_experts)
         
         # Validation Data 
         if valid_data is not None:
             labels_valid = self.pred_clusters(valid_data.mode())
             prob_dist_valid = self.__prob_mass_cluster(self.n_experts, labels_valid)
-        else:
-            prob_dist_valid = None
-        if valid_data is not None:
             valid_loader_list_experts_global = self.__divide_dataset_for_experts(valid_data.mode(), valid_target, prob_dist_valid, self.n_experts, batch_size = batch_size_experts, weighted_experts = None)
         else:
+            prob_dist_valid = None
             valid_loader_list_experts_global = [None] * self.n_experts
             
             
-        # Train Experts   
+        # Train Experts  
+            
         for i in range(self.n_experts):
-            self.experts[i].train_model(train_loader = train_loader_list_experts_local[i], valid_loader = valid_loader_list_experts_global[i],
-                                        prob_dist_train = prob_dist_train, n_epochs = n_epochs, loss_fn = loss_fn, weighted_loss = weighted_experts, 
-                                        lr = lr, reg_alpha = reg_alpha, reg_lambda = reg_lambda, verbose = self.verbose)   
+            self.experts[i].task = self.task
+            self.experts[i].train_model(train_loader = train_loader_list_experts[i], valid_loader = valid_loader_list_experts_global[i],
+                                        n_epochs = n_epochs, loss_fn = loss_fn, weighted_loss = weighted_experts, lr = lr, 
+                                        reg_alpha = reg_alpha, reg_lambda = reg_lambda, verbose = self.verbose)   
         
         
         # Train Gate
         
         # Load Global Mode Train und Validation Set for Training of Gate
-        train_loader_gate, valid_loader_gate = self.__datasets_for_gate(train_data.mode(), train_target, prob_dist_train, valid_data, valid_target, prob_dist_valid, batch_size = batch_size_gate, weighted_gate = weighted_gate)
+        train_loader_expert, train_loader_gate, valid_loader_expert, valid_loader_gate = self.__datasets_for_gate(train_data.mode(), train_target, prob_dist_train, valid_data, valid_target,
+                                                                                                                  prob_dist_valid, batch_size = batch_size_gate, weighted_gate = weighted_gate)
         
+
+        self.gate.train_model(train_loader_expert, train_loader_gate, valid_loader_expert, valid_loader_gate, n_epochs, loss_fn, weighted_gate, lr, reg_alpha, reg_lambda, verbose)
         print("finished")
         pass
         
@@ -141,9 +146,6 @@ class MoE():
 
     def pred_clusters(self, newdata): 
         return self.kmeans.predict(newdata)
-
-
-
 
             
     def __prob_mass_cluster(self, n_experts, labels, n_samples = 1):
@@ -259,26 +261,31 @@ class MoE():
             weights  = np.repeat(1, len(train_target)).tolist()
         else: 
             weights = np.max(prob_train, axis=1).tolist()
-        # train
-        print(weights)
+        # train gate
         train_data_and_dist = np.concatenate((train_data, prob_train), axis=1)
         train_dataset_gate = CustomDataset(train_data_and_dist, train_target, weights, self.task)
         train_loader_gate = DataLoader(train_dataset_gate, batch_size)
+        # train expert
+        train_dataset_expert = CustomDataset(train_data, train_target, weights, self.task)
+        train_loader_expert = DataLoader(train_dataset_expert, batch_size)
         if valid_data is not None:
-            # valid
+            # valid gate
             valid_data_and_dist = np.concatenate((valid_data.mode(), prob_valid), axis=1)
-            valid_dataset_gate = CustomDataset(valid_data_and_dist, valid_target, weights, self.task)
+            valid_dataset_gate = CustomDataset(valid_data_and_dist, valid_target, weights = None, task = self.task)
             valid_loader_gate = DataLoader(valid_dataset_gate, batch_size)
-            return train_loader_gate, valid_loader_gate
+            # valid expert
+            valid_dataset_expert = CustomDataset(valid_data.mode(), valid_target, weights = None, task = self.task)
+            valid_loader_expert = DataLoader(valid_dataset_expert, batch_size)
+            return train_loader_expert, train_loader_gate, valid_loader_expert, valid_loader_gate
         else:
-            return train_loader_gate, None
+            return train_loader_expert, train_loader_gate, None, None
         
         
     def _init_model(self):
     
-        output_experts = self.inputsize if not self.probs_to_gate else self.inputsize + self.n_experts
-        self.experts = [Custom_nn(inputs = self.inputsize,  outputs = output_experts, dropout = self.dropout) for i in range(self.n_experts)]
-        self.gate = Custom_nn( inputs = output_experts * self.n_experts, outputs = self.outputsize, dropout = self.dropout)
+        self.experts = [Custom_nn(inputs = self.inputsize,  outputs = self.outputsize, dropout = self.dropout) for i in range(self.n_experts)]
+        self.gate = Gate_nn(inputs = self.inputsize + self.n_experts, outputs = self.n_experts, 
+                            dropout = self.dropout, trained_experts_list = self.experts)
         
     
     
@@ -290,7 +297,7 @@ class CustomDataset(Dataset):
         
         #to torch tensors
         self.X = torch.tensor(X, dtype=torch.float64)
-        if task == 1 or 2:
+        if task in (1, 2):
             self.y = torch.tensor(y, dtype=torch.long)
         else:
             self.y = torch.tensor(y, dtype=torch.float64)
@@ -302,9 +309,9 @@ class CustomDataset(Dataset):
         else:
             self.weights = torch.tensor(weights, dtype=torch.float64)
         
-        
     def __len__(self):
         return len(self.y)
+    
     def __getitem__(self, index):
         return self.X[index], self.y[index], self.weights[index]
     
@@ -355,8 +362,7 @@ class Custom_nn(nn.Module):
         """
         super(Custom_nn, self).__init__()
 
-        torch.set_default_dtype(torch.float64)
-
+        # torch.set_default_dtype(torch.float64)
         layer_list = list()
         layer_list.append(nn.Linear(inputs, hidden[1]))
         layer_list.append(activation)
@@ -369,26 +375,20 @@ class Custom_nn(nn.Module):
 
         self.stacked_layers = nn.Sequential(*layer_list)
 
-        self.task = 'numeric' if task is None else task
 
 
     def forward(self, x):
-        if self.task == 'numeric': 
-            return self.stacked_layers(x)
-        
-        if self.task == 'binary': 
+        # binary
+        if self.task == 1: 
             return torch.sigmoid(self.stacked_layers(x))
-        
-        if self.task == 'multiclass': 
-            return torch.nn.Softmax(self.stacked_layers(x))
+        # multiclass
+        if self.task == 2: 
+            return torch.nn.Softmax(dim=1)(self.stacked_layers(x))
+        # regression
+        if self.task == 3: 
+            return self.stacked_layers(x)
 
-    # def l1_loss(self, w):
-    #     return torch.abs(w).sum()
-    
-    # def l2_loss(self, w):
-    #     return torch.square(w).sum()
-    
-    def train_model(self, train_loader, valid_loader, prob_dist_train, n_epochs, loss_fn, weighted_loss, lr, reg_alpha, reg_lambda, verbose):
+    def train_model(self, train_loader, valid_loader, n_epochs, loss_fn, weighted_loss, lr, reg_alpha, reg_lambda, verbose):
         best_score = np.inf
         best_weights = None
         history = []
@@ -399,7 +399,6 @@ class Custom_nn(nn.Module):
                 
                 X_batch, y_batch, weights_batch = data
                 # Convert input data to the same data type as the model's weights
-                y_batch = y_batch.to(torch.float64)  
                  
                 optimizer.zero_grad()
 
@@ -451,7 +450,100 @@ class Custom_nn(nn.Module):
         if valid_loader is not None:
             self.load_state_dict(best_weights)
         return history, best_score
+   
+
+class Gate_nn(Custom_nn):
+    """
+    
+    """
+    def __init__(self, inputs, outputs, hidden=[64, 64], activation=nn.ReLU(), dropout=0, trained_experts_list = None, task = 3):
+        super(Gate_nn, self).__init__(inputs, outputs, hidden, activation, dropout)
+        self.task = task
+        self.trained_experts_list = nn.ModuleList(trained_experts_list)
+
+    def forward(self, inputs_gate, inputs_expert):
+        # Propagate inputs_gate through the model
+        softmax_layer = nn.Softmax(dim=-1)
+        gate_output = softmax_layer(super(Gate_nn, self).forward(inputs_gate))
+        expert_outputs_weighted = 0
+
+        expert_outputs = []
+        expert_weights = []
+        for i, expert in enumerate(self.trained_experts_list):
+            expert_output = expert(inputs_expert)
+            expert_output.detach()  # mark expert weights as not trainable
+            expert_outputs_weighted += expert_output * gate_output[:, i:i+1]
+            expert_outputs.append(expert_output)
+            expert_weights.append(gate_output[:, i:i+1])
+
+        output = expert_outputs_weighted.sum(dim=1)
         
+        return output
+    
+    def train_model(self, train_loader_expert, train_loader_gate, valid_loader_expert, valid_loader_gate, n_epochs, loss_fn, weighted_loss, lr, reg_alpha, reg_lambda, verbose):
+        best_score = np.inf
+        best_weights = None
+        history = []
+        optimizer = torch.optim.Adam(self.parameters(), lr = lr)
+        for epoch in range(n_epochs):
+            self.train()
+            for i, (data_expert, data_gate) in enumerate(zip(train_loader_expert, train_loader_gate)):
+                X_batch_gate, y_batch_gate, weights_batch_gate = data_gate
+                X_batch_expert, y_batch_expert, weights_batch_expert = data_expert
+                # Convert input data to the same data type as the model's weights
+                y_batch_gate = y_batch_gate.to(torch.float64)  
+                 
+                optimizer.zero_grad()
+
+                y_pred = self(X_batch_gate, X_batch_expert)
+                loss = loss_fn(y_pred, y_batch_gate)
+                loss = torch.mean(loss * weights_batch_gate)
+                
+                # Elastic Net regularization (L1 + L2)
+                l1_regularization = torch.tensor(0., dtype=torch.float64)
+                for param in self.parameters():
+                    l1_regularization += torch.norm(param, p=1)
+    
+                l2_regularization = torch.tensor(0., dtype=torch.float64)
+                for param in self.parameters():
+                    l2_regularization += torch.norm(param, p=2)
+    
+                loss += reg_lambda * (reg_alpha * l1_regularization + (1 - reg_alpha) * l2_regularization) 
+
+                
+                loss.backward()
+                optimizer.step()
+
+        
+            # Validation is optional
+            loss_val = None
+            if valid_loader_gate is not None:
+                self.eval()
+                with torch.no_grad():
+                    y_preds = []
+                    y_targets = []
+                    for (valid_data_expert),(valid_data_gate) in zip(valid_loader_expert, valid_loader_gate):
+                        X_val_expert, y_val_expert, weights_val_expert = valid_data_expert
+                        X_val_gate, y_val_gate, weights_val_gate = valid_data_gate
+                        y_pred = self(X_val_gate, X_val_expert)
+                        y_preds.append(y_pred)
+                        y_targets.append(y_val_gate)
+    
+                    y_preds = torch.cat(y_preds, dim=0)
+                    y_targets = torch.cat(y_targets, dim=0)
+    
+    
+                    loss_val = loss_fn(y_preds, y_targets)
+                    loss_val = float(loss_val.numpy())
+                    history.append(loss_val)
+                    if loss_val < best_score:
+                        best_score = loss_val
+                        best_weights = copy.deepcopy(self.state_dict())
+            if (verbose == True) and (epoch % 5 == 0):
+                print(f"Epoch: {epoch}, Train_Loss: {loss}, Val_Loss: {loss_val}")
+        if valid_loader_gate is not None:
+            self.load_state_dict(best_weights)
+        return history, best_score
 
 def init_normal(module):
     if type(module) == nn.Linear:
