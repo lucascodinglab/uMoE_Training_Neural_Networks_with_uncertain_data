@@ -1,4 +1,3 @@
-
 import uframe as uf
 import numpy as np
 from sklearn.datasets import fetch_california_housing
@@ -14,31 +13,51 @@ from scipy.spatial.distance import cdist
 from torch.utils.data import DataLoader, Dataset
 import copy
 import warnings
+from sklearn.model_selection import train_test_split
 
 
 class MoE(): 
     """
-    
-    A class used for storing and working with uncertain data.
+    A class for training and using the Mixture of Experts (MoE) model for uncertain data analysis.
 
-    ...
-
+    Attributes:
     ----------
     data : list
-        A list of data instances of class uframe_instance
+        A list of data instances of class `uframe_instance`.
 
-    Methods
+    Methods:
     -------
-    fit()
-        Trains the Moe 
-        
-    predict(n = 1, seed = None)
-        predicts with the the model 
+    fit(train_data, train_target, valid_data=None, valid_target=None, reg_alpha=0.5, reg_lambda=0.0003,
+        lr=0.001, n_epochs=100, batch_size_experts=4, batch_size_gate=8, local_mode=True, n_samples=100,
+        threshold_samples=0.5, weighted_experts=True, weighted_gate=False, verbose=False, seed=None)
+        Trains the MoE model on the provided training data and targets. It allows for specifying validation data
+        and various hyperparameters for training customization.
 
+    predict(test_data)
+        Predicts the output using the trained Mixture of Experts (MoE) model for uncertain data.
+
+    Description:
+    -----------
+    The `MoE` class is designed to handle uncertain data analysis using the Mixture of Experts (MoE) model.
+    It provides functionalities for training the MoE model on uncertain data and making predictions.
+
+    The main method, `fit()`, allows users to train the MoE model on the given training data and targets.
+    Users can provide optional validation data to monitor the model's performance during training. The `fit()`
+    method also allows users to customize various hyperparameters, such as the learning rate, number of epochs,
+    batch sizes, regularization parameters, and more.
+
+    Once the MoE model is trained, the `predict()` method enables users to make predictions on new uncertain data.
+    The method clusters the test data based on the trained MoE model's clustering algorithm and then loads the
+    data into the expert and gate models to make predictions. The final predictions are stored in a list.
+
+    The MoE model is particularly useful when dealing with uncertain data, where each instance has a probability
+    distribution over its possible values. It can handle classification tasks, regression tasks, and binary
+    classification problems with ease.
+
+    The `MoE` class is an essential tool for researchers and practitioners working with uncertain data and seeking
+    to leverage the power of the Mixture of Experts model for accurate predictions and meaningful uncertainty
+    estimates.
     """
-
-    # Ignore RuntimeWarnings
-    warnings.filterwarnings("ignore", category = RuntimeWarning)
     def __init__(self, n_experts, hidden_experts = [64,64], hidden_gate = [64,64], dropout = 0, inputsize = 1, outputsize = 1, probs_to_gate = True) : 
     
         self.n_experts = n_experts 
@@ -86,14 +105,14 @@ class MoE():
         test_loader_gate = DataLoader(test_dataset_gate, batch_size = self.batch_size_gate)
         
         # iterate through dataloader
-        predictions = []
+        self.predictions = []
         for data_gate, data_expert in zip(test_loader_gate, test_dataset_expert):
             X_batch_gate, y_batch_gate, weights_batch_gate = data_gate
             X_batch_expert, y_batch_expert, weights_batch_expert = data_expert
             
-            predictions.extend(self.gate.forward(X_batch_gate, X_batch_expert).detach().numpy())
-        print("Finished predicting")  
-        return predictions
+            self.predictions.extend(self.gate.forward(X_batch_gate, X_batch_expert).detach().numpy())
+        print("Finished predicting")
+        return self.predictions
         
         
         
@@ -105,6 +124,66 @@ class MoE():
             batch_size_gate = 8, local_mode = True, n_samples = 100, 
             threshold_samples = .5, weighted_experts = True, 
             weighted_gate = False, verbose = False, seed = None): 
+        """
+        Train the Mixture of Experts (MoE) model using the provided training data and target values.
+        
+        Parameters:
+        -----------
+        train_data : ndarray
+            The input training data to be used for training the MoE model. The shape of the array should be (n_samples, n_features).
+        train_target : ndarray
+            The target values corresponding to the training data. The shape of the array should be (n_samples,) for classification tasks, or (n_samples, 1) for regression tasks.
+        valid_data : ndarray, optional
+            The optional validation data to be used for monitoring the model's performance during training. The shape of the array should be (n_samples, n_features). Default is None.
+        valid_target : ndarray, optional
+            The optional target values corresponding to the validation data. The shape of the array should be (n_samples,) for classification tasks, or (n_samples, 1) for regression tasks. Default is None.
+        reg_alpha : float, optional
+            The weight parameter for the Elastic Net regularization L1 term. Default is 0.5.
+        reg_lambda : float, optional
+            The weight parameter for the Elastic Net regularization L2 term. Default is 0.0003.
+        lr : float, optional
+            The learning rate for the optimizer used during training. Default is 0.001.
+        n_epochs : int, optional
+            The number of epochs to train the MoE model. Default is 100.
+        batch_size_experts : int, optional
+            The batch size for training the individual expert models. Default is 4.
+        batch_size_gate : int, optional
+            The batch size for training the gate model. Default is 8.
+        local_mode : bool, optional
+            A boolean flag indicating whether to use local mode for training. If True, the training data will be divided based on the dominant cluster of each instance. If False, global mode will be used, where all instances are used for training the experts. Default is True.
+        n_samples : int, optional
+            The number of samples to be used for training the MoE model in the case of local mode. Default is 100.
+        threshold_samples : float, optional
+            The threshold for selecting instances for training in the case of local mode. Only instances whose cluster probability is above this threshold will be used for training the experts. Default is 0.5.
+        weighted_experts : bool, optional
+            A boolean flag indicating whether to apply weights to the expert loss during training. If True, the losses of individual experts will be weighted based on the probability distribution of clusters. Default is True.
+        weighted_gate : bool, optional
+            A boolean flag indicating whether to apply weights to the gate loss during training. If True, the gate loss will be weighted based on the probability distribution of clusters. Default is False.
+        verbose : bool, optional
+            A boolean flag indicating whether to print progress and training information during the training process. Default is False.
+        seed : int, optional
+            The seed value for random number generation. Default is None.
+
+        Returns:
+        --------
+        None
+        
+        Notes:
+        ------
+        This function performs the following steps to train the MoE model:
+        
+        1. Preprocess the input data and determine the prediction task type (binary classification, multi-class classification, or regression).
+        2. Sample data using Kernel Density Estimation (KDE) and restrict samples to maintain a manageable size.
+        3. Perform clustering on the sampled data to determine expert assignments for each instance.
+        4. Distribute the probability mass of clusters based on clustering results.
+        5. If local mode is enabled, use the dominant cluster to order instances for each corresponding expert. Otherwise, use global mode and directly divide the data for expert training.
+        6. Optionally, use validation data for monitoring the model's performance during training.
+        7. Train each expert model with the specified loss function, regularization, and optimization settings.
+        8. Train the gate model to combine the outputs of individual experts and perform predictions.
+        
+        The function optimizes the parameters of the MoE model to best fit the training data and task type while considering the provided hyperparameters and settings.
+        
+        """
         
         self.train_data = train_data
         self.verbose = verbose
@@ -242,7 +321,7 @@ class MoE():
                     closest_cluster = np.argmin(distances)
                     # Find the closest point and get its cluster label
                     
-                    return -kde.pdf(inst.reshape(1,-1)) if closest_cluster == cluster else np.inf
+                    return -kde.pdf(inst.reshape(1,-1)) if closest_cluster == cluster else 0 # np.inf
 
                 optimize_modal = basinhopping(lambda x: objective_function(x = x, cluster = cluster, kde = data.data[i], instance = instance, missing_dims = missing_dims, centroids = self.kmeans.cluster_centers_), x0=cluster_centers, minimizer_kwargs=minimizer_kwargs, niter=15, stepsize=0.2)                                    
                 modal_values = optimize_modal.x.tolist()
@@ -328,7 +407,17 @@ class MoE():
         self.experts = [Custom_nn(inputs = self.inputsize,  outputs = self.outputsize, dropout = self.dropout) for i in range(self.n_experts)]
         self.gate = Gate_nn(inputs = self.inputsize + self.n_experts, outputs = self.n_experts, 
                             dropout = self.dropout, trained_experts_list = self.experts)
+   
         
+    def evaluation(self, true_targets):
+        if self.task == 1:
+            score = 0 
+        elif self.task == 2:
+            score = 0
+        else:
+            score = mean_squared_error(true_targets, self.predictions)
+        
+        return score
     
     
 class CustomDataset(Dataset):
@@ -344,12 +433,12 @@ class CustomDataset(Dataset):
         elif task == 3:
             self.y = torch.tensor(y, dtype=torch.float64)
         else:
-            self.y = torch.tensor(np.zeros(len(self.X)), dtype=torch.float64)
+            self.y = torch.tensor(np.zeros(len(X)), dtype=torch.float64)
         
         #if None all = 1
         
         if weights == None: 
-            self.weights = torch.tensor(np.ones(len(self.X)), dtype=torch.float64)
+            self.weights = torch.tensor(np.ones(len(X)), dtype=torch.float64)
         else:
             self.weights = torch.tensor(weights, dtype=torch.float64)
             
@@ -473,9 +562,9 @@ class Custom_nn(nn.Module):
                 with torch.no_grad():
                     y_preds = []
                     y_targets = []
-                    for X_val, y_val in valid_loader:
-                        y_pred = self(X_val)
-                        y_preds.append(y_pred)
+                    for X_val, y_val, weights_val in valid_loader:
+                        y_pred_val = self(X_val)
+                        y_preds.append(y_pred_val)
                         y_targets.append(y_val)
     
                     y_preds = torch.cat(y_preds, dim=0)
@@ -483,7 +572,7 @@ class Custom_nn(nn.Module):
     
     
                     loss_val = loss_fn(y_preds, y_targets)
-                    loss_val = float(loss_val.numpy())
+                    loss_val = float(loss_val.mean())
                     history.append(loss_val)
                     if loss_val < best_score:
                         best_score = loss_val
@@ -497,7 +586,7 @@ class Custom_nn(nn.Module):
 
 class Gate_nn(Custom_nn):
     """
-    
+    Subclass of Custom_nn used for training of the Gate Unit
     """
     def __init__(self, inputs, outputs, hidden=[64, 64], activation=nn.ReLU(), dropout=0, trained_experts_list = None, task = 3):
         super(Gate_nn, self).__init__(inputs, outputs, hidden, activation, dropout)
@@ -575,9 +664,8 @@ class Gate_nn(Custom_nn):
                     y_preds = torch.cat(y_preds, dim=0)
                     y_targets = torch.cat(y_targets, dim=0)
     
-    
                     loss_val = loss_fn(y_preds, y_targets)
-                    loss_val = float(loss_val.numpy())
+                    loss_val = float(loss_val.mean())
                     history.append(loss_val)
                     if loss_val < best_score:
                         best_score = loss_val
@@ -588,25 +676,9 @@ class Gate_nn(Custom_nn):
             self.load_state_dict(best_weights)
         return history, best_score
 
-def init_normal(module):
-    if type(module) == nn.Linear:
-        nn.init.normal_(module.weight, mean=0, std=1)
-        nn.init.zeros_(module.bias)
 
-def init_uniform(module):
-    if type(module) == nn.Linear:
-        nn.init.uniform_(module.weight, a=-1.0, b=1.0)
-        nn.init.zeros_(module.bias)
-
-
-
-
-def eval_moe(**kwargs): 
-    pass
     
-    
-    pass
-
+    	
 
 
 if __name__ == "__main__":
@@ -614,24 +686,34 @@ if __name__ == "__main__":
     #data loading and preprocessing: 
     data = fetch_california_housing()
 
-
-    #scaling 
-
-    X_train = MinMaxScaler().fit_transform(data.data[:300,:])
-    y_train = data.target[:300].reshape(-1,1)
-    X_test = MinMaxScaler().fit_transform(data.data[300:310,:])
-    y_test = data.target[300:310].reshape(-1,1)
+    
+    size = 2000
+    data_sc = MinMaxScaler().fit_transform(data.data[:size])
+    target = data.target[:size]
+    
+    # split
+    data_train, data_test, target_train, target_test = train_test_split(data_sc, target, test_size=0.2, random_state=42)
+    # val
+    data_train, data_val, target_train, target_val = train_test_split(data_train, target_train, test_size=0.25, random_state=42)
+        
     
 
     #uncertainty in data 
-    X = uf.uframe_from_array_mice_2(X_train, kernel = "gaussian" , p =.05, mice_iterations = 2)
-    # X.analysis(X_true, save= "filename", bins = 20)
-    
+    X_train = uf.uframe_from_array_mice_2(data_train, kernel = "gaussian" , p =.01, mice_iterations = 2)
+    X_val = uf.uframe_from_array_mice_2(data_val, kernel = "gaussian" , p =.01, mice_iterations = 2)
+    # X.analysis(X_train, save= "filename", bins = 20)
 
     
+
+    # MoE
     moe = MoE(2, inputsize=8, outputsize=1)
-    moe.fit(X, y_train, threshold_samples=.6, local_mode = True, weighted_experts=False, 
-            verbose=True, batch_size_experts=2, batch_size_gate=10)
-    predictions = moe.predict(X_test)
+    # val
+    moe.fit(X_train, target_train, X_val, target_val, threshold_samples=.6, local_mode = True, weighted_experts=False, 
+            verbose=True, batch_size_experts=3, batch_size_gate=12)
+  
+    # predictions / eval
+    predictions = moe.predict(data_test)
+    score = moe.evaluation(target_test)
+    print(f"score: {score}")
 
 
