@@ -535,7 +535,7 @@ class Custom_nn(nn.Module):
                  
                 optimizer.zero_grad()
                 y_pred = self(X_batch)
-                loss = loss_fn(y_pred, y_batch)
+                loss = loss_fn(y_pred, y_batch.reshape(-1,1))
                 loss = torch.mean(loss * weights_batch)
                 
                 # Elastic Net regularization (L1 + L2)
@@ -571,7 +571,7 @@ class Custom_nn(nn.Module):
                     y_targets = torch.cat(y_targets, dim=0)
     
     
-                    loss_val = loss_fn(y_preds, y_targets)
+                    loss_val = loss_fn(y_preds, y_targets.reshape(-1,1))
                     loss_val = float(loss_val.mean())
                     history.append(loss_val)
                     if loss_val < best_score:
