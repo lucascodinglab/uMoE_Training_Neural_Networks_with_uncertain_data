@@ -53,9 +53,50 @@ class MoE():
         
         
         
-    def predict(self, new_data): 
+    def predict(self, test_data):
+        """
+        Predicts the output using the trained Mixture of Experts (MoE) model.
+    
+        Parameters
+        ----------
+        test_data : ndarray
+            MinMax scaled data for testing. The shape of the array should be (n_samples, n_features).
+    
+        Returns
+        -------
+        list
+        A list containing the predicted outputs from the Gate for each data point in the 'test_data'.
+    
+        Notes
+        -----
+        This function clusters the test data based on the trained MoE model's clustering algorithm.
+        Then, it loads the test data into the expert and gate models to make predictions.
+        The final predictions are stored in the 'predictions' list.
+        """
         
-        pass
+        # cluster test data
+        labels_test = self.pred_clusters(test_data)
+        prob_dist_test = self.__prob_mass_cluster(self.n_experts, labels_test, n_samples = 1)
+        
+        # load data for expert and gate
+        test_dataset_expert = CustomDataset(test_data)
+        test_loader_expert = DataLoader(test_dataset_expert, batch_size = self.batch_size_gate)
+        test_data_gate = np.concatenate((test_data,prob_dist_test), axis=1)
+        test_dataset_gate = CustomDataset(test_data_gate)
+        test_loader_gate = DataLoader(test_dataset_gate, batch_size = self.batch_size_gate)
+        
+        # iterate through dataloader
+        predictions = []
+        for data_gate, data_expert in zip(test_loader_gate, test_dataset_expert):
+            X_batch_gate, y_batch_gate, weights_batch_gate = data_gate
+            X_batch_expert, y_batch_expert, weights_batch_expert = data_expert
+            
+            predictions.extend(self.gate.forward(X_batch_gate, X_batch_expert).detach().numpy())
+        print("Finished predicting")  
+        return predictions
+        
+        
+        
         
     
     def fit(self, train_data, train_target, valid_data = None, 
@@ -64,9 +105,10 @@ class MoE():
             batch_size_gate = 8, local_mode = True, n_samples = 100, 
             threshold_samples = .5, weighted_experts = True, 
             weighted_gate = False, verbose = False, seed = None): 
+        
         self.train_data = train_data
         self.verbose = verbose
-        
+        self.batch_size_gate = batch_size_gate
         # Get Information about Prediction Task
         self.task, input_size, output_size = self.__get_task_type(train_data, np.array(train_target))
         # binary classification
@@ -79,8 +121,8 @@ class MoE():
         elif self.task == 3:
             loss_fn = nn.MSELoss(reduction = "none")
         # sampling of KDE and Restriction of samples
-        # sampled_data = train_data.sample(n_samples,seed = seed, threshold = threshold_samples)
-        sampled_data = train_data.sample(n_samples,seed = seed)
+        sampled_data = train_data.sample(n_samples,seed = seed, threshold = threshold_samples)
+        # sampled_data = train_data.sample(n_samples,seed = seed)
 
         # clustering
         self.__clustering(self.n_experts, sampled_data)
@@ -126,13 +168,12 @@ class MoE():
         
         # Load Global Mode Train und Validation Set for Training of Gate
         train_loader_expert, train_loader_gate, valid_loader_expert, valid_loader_gate = self.__datasets_for_gate(train_data.mode(), train_target, prob_dist_train, valid_data, valid_target,
-                                                                                                                  prob_dist_valid, batch_size = batch_size_gate, weighted_gate = weighted_gate)
+                                                                                                                  prob_dist_valid, batch_size = self.batch_size_gate, weighted_gate = weighted_gate)
         
 
         self.gate.train_model(train_loader_expert, train_loader_gate, valid_loader_expert, valid_loader_gate, n_epochs, loss_fn, weighted_gate, lr, reg_alpha, reg_lambda, verbose)
-        print("finished")
-        pass
-        
+        print("Finished training")
+
     
     def __clustering(self, n_experts, sampled_data):
         """
@@ -241,7 +282,8 @@ class MoE():
             y_exp = y[indices]
             
             if weighted_experts is False: 
-                weights  = np.repeat(1, len(indices)).tolist()
+                # weights  = np.repeat(1, len(indices)).tolist()
+                weights = None
             else: 
                 weights_exp = prob_dist[indices]
                 weights = np.max(weights_exp, axis=1).tolist()
@@ -293,22 +335,24 @@ class CustomDataset(Dataset):
     """
     Custom Dataset Class, which is able to process X, y and the weights of the instances
     """
-    def __init__(self, X, y, weights = None, task = None):
+    def __init__(self, X, y = None, weights = None, task = None):
         
         #to torch tensors
         self.X = torch.tensor(X, dtype=torch.float64)
         if task in (1, 2):
             self.y = torch.tensor(y, dtype=torch.long)
-        else:
+        elif task == 3:
             self.y = torch.tensor(y, dtype=torch.float64)
-            
+        else:
+            self.y = torch.tensor(np.zeros(len(self.X)), dtype=torch.float64)
+        
         #if None all = 1
         
         if weights == None: 
-            self.weights = torch.Tensor.repeat(torch.Tensor([1]), len(self.y), dtype=torch.float64)
+            self.weights = torch.tensor(np.ones(len(self.X)), dtype=torch.float64)
         else:
             self.weights = torch.tensor(weights, dtype=torch.float64)
-        
+            
     def __len__(self):
         return len(self.y)
     
@@ -362,7 +406,7 @@ class Custom_nn(nn.Module):
         """
         super(Custom_nn, self).__init__()
 
-        # torch.set_default_dtype(torch.float64)
+        torch.set_default_dtype(torch.float64)
         layer_list = list()
         layer_list.append(nn.Linear(inputs, hidden[1]))
         layer_list.append(activation)
@@ -401,7 +445,6 @@ class Custom_nn(nn.Module):
                 # Convert input data to the same data type as the model's weights
                  
                 optimizer.zero_grad()
-
                 y_pred = self(X_batch)
                 loss = loss_fn(y_pred, y_batch)
                 loss = torch.mean(loss * weights_batch)
@@ -574,18 +617,21 @@ if __name__ == "__main__":
 
     #scaling 
 
-    X_true = MinMaxScaler().fit_transform(data.data[:50,:])
-    y = StandardScaler().fit_transform(data.target[:50].reshape(-1,1))
+    X_train = MinMaxScaler().fit_transform(data.data[:300,:])
+    y_train = data.target[:300].reshape(-1,1)
+    X_test = MinMaxScaler().fit_transform(data.data[300:310,:])
+    y_test = data.target[300:310].reshape(-1,1)
     
 
     #uncertainty in data 
-    X = uf.uframe_from_array_mice_2(X_true, kernel = "gaussian" , p =.5, mice_iterations = 2)
+    X = uf.uframe_from_array_mice_2(X_train, kernel = "gaussian" , p =.05, mice_iterations = 2)
     # X.analysis(X_true, save= "filename", bins = 20)
     
 
     
-    moe = MoE(4, inputsize=8, outputsize=1)
-    moe.fit(X, y, threshold_samples=1, local_mode = True, weighted_experts=True, verbose=True)
-    
+    moe = MoE(2, inputsize=8, outputsize=1)
+    moe.fit(X, y_train, threshold_samples=.6, local_mode = True, weighted_experts=False, 
+            verbose=True, batch_size_experts=2, batch_size_gate=10)
+    predictions = moe.predict(X_test)
 
-    
+
