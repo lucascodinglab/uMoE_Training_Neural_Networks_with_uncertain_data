@@ -101,20 +101,20 @@ class MoE():
         
         # load data for expert and gate
         test_dataset_expert = CustomDataset(test_data)
-        test_loader_expert = DataLoader(test_dataset_expert, batch_size = self.batch_size_gate)
+        test_loader_expert = DataLoader(test_dataset_expert, batch_size = 10)
         test_data_gate = np.concatenate((test_data, prob_dist_test), axis=1)
         test_dataset_gate = CustomDataset(test_data_gate)
-        test_loader_gate = DataLoader(test_dataset_gate, batch_size = self.batch_size_gate)
+        test_loader_gate = DataLoader(test_dataset_gate, batch_size = 10)
         
         # iterate through dataloader
-        self.predictions = []
-        for data_gate, data_expert in zip(test_loader_gate, test_dataset_expert):
+        predictions = []
+        for data_gate, data_expert in zip(test_loader_gate, test_loader_expert):
             X_batch_gate, y_batch_gate, weights_batch_gate = data_gate
             X_batch_expert, y_batch_expert, weights_batch_expert = data_expert
             
-            self.predictions.extend(self.gate.forward(X_batch_gate, X_batch_expert).detach().numpy())
+            predictions.extend(self.gate.forward(X_batch_gate, X_batch_expert).detach().numpy())
 
-        return self.predictions
+        return predictions
         
         
         
@@ -411,23 +411,21 @@ class MoE():
                             dropout = self.dropout, trained_experts_list = self.experts)
    
         
-    def evaluation(self, true_targets):
+    def evaluation(self, predictions, true_targets):
         if self.task in (1,2):
-            score = accuracy_score(true_targets, self.predictions) * 100
+            score = accuracy_score(true_targets, predictions) * 100
         else:
-            score = mean_squared_error(true_targets, self.predictions)
+            score = mean_squared_error(true_targets, predictions)
         
         return score
     
     def analyze(self, data_certain, save_path):
-        self.save_path = save_path + str("Moe_analysis.pdf")
-        
-        labels_certain = self.__clustering(self.n_experts, data_certain)
-        print(labels_certain)
+        self.save_path = save_path + str("_analysis.pdf")
+        labels_certain = self.pred_clusters(data_certain)
         prob_dist_certain = self.__prob_mass_cluster(self.n_experts, labels_certain)
             
-        self.__analyze_clustering(prob_dist_certain, self.prob_dist_train)
-        
+        dominant_clusters_local, dominant_clusters_global = self.__analyze_clustering(prob_dist_certain, self.prob_dist_train)
+        self.__cluster_change(dominant_clusters_local, dominant_clusters_global)
     
     def __analyze_clustering(self, prob_dist_certain, prob_dist_global):
         num_clusters = len(prob_dist_certain[0])  # Number of clusters
@@ -436,7 +434,7 @@ class MoE():
         dominant_clusters_global = np.argmax(prob_dist_global, axis=1)
         
         if self.local_mode:
-            labels_local_mode = self.__clustering(self.n_experts, self.data_local_mode)
+            labels_local_mode = self.pred_clusters(self.train_data_local)
             prob_dist_local_mode = self.__prob_mass_cluster(self.n_experts, labels_local_mode)
             dominant_clusters_local = np.argmax(prob_dist_local_mode, axis=1)
             cluster_accuracies_local = np.zeros(num_clusters)
@@ -457,38 +455,73 @@ class MoE():
         if self.local_mode:
             weighted_average_local = accuracy_score(dominant_clusters_certain, dominant_clusters_local)
     
-        # Plot the cluster accuracies for the global mode as a bar chart
-        plt.figure(figsize=(10, 6))
-        plt.bar(range(num_clusters), cluster_accuracies_global, color='blue', alpha=0.7)
-        plt.axhline(y=weighted_average_global, color='r', linestyle='--', label='Weighted Average (Global)')
-        plt.xlabel('Cluster')
-        plt.ylabel('Accuracy')
-        plt.title(f'Global - Cluster Assignment Accuracy (Average: {weighted_average_global:.2f})')
-        plt.legend()
-        plt.xticks(range(num_clusters))
-        
-        # Save the global mode plot to PDF
+        # Save the plots to the PDF file
         with PdfPages(self.save_path) as pdf:
-            pdf.savefig()
-            plt.close()
-        
-        if self.local_mode:
-            # Plot the cluster accuracies for the local mode as a bar chart
+            # Plot the cluster accuracies for the global mode as a bar chart
             plt.figure(figsize=(10, 6))
-            plt.bar(range(num_clusters), cluster_accuracies_local, color='green', alpha=0.7)
-            plt.axhline(y=weighted_average_local, color='r', linestyle='--', label='Weighted Average (Local)')
+            plt.bar(range(num_clusters), cluster_accuracies_global, color='blue', alpha=0.7)
+            plt.axhline(y=weighted_average_global, color='r', linestyle='--', label='Weighted Average (Global)')
             plt.xlabel('Cluster')
             plt.ylabel('Accuracy')
-            plt.title(f'Local - Cluster Assignment Accuracy (Average: {weighted_average_local:.2f})')
+            plt.title(f'Global - Cluster Assignment Accuracy (Average: {weighted_average_global:.2f})')
             plt.legend()
             plt.xticks(range(num_clusters))
             
-            # Save the local mode plot to the existing PDF
-            with PdfPages(self.save_path) as pdf:
+            # Save the global mode plot to PDF
+            pdf.savefig()
+            plt.close()
+        
+            if self.local_mode:
+                # Plot the cluster accuracies for the local mode as a bar chart
+                plt.figure(figsize=(10, 6))
+                plt.bar(range(num_clusters), cluster_accuracies_local, color='green', alpha=0.7)
+                plt.axhline(y=weighted_average_local, color='r', linestyle='--', label='Weighted Average (Local)')
+                plt.xlabel('Cluster')
+                plt.ylabel('Accuracy')
+                plt.title(f'Local - Cluster Assignment Accuracy (Average: {weighted_average_local:.2f})')
+                plt.legend()
+                plt.xticks(range(num_clusters))
+                
+                # Save the local mode plot to PDF
                 pdf.savefig()
                 plt.close()
-        
-        
+        if self.local_mode:
+            return dominant_clusters_local, dominant_clusters_global
+        else:
+            return None, dominant_clusters_global
+                
+    def __cluster_change(self, old, new):
+         transitions = {}
+         for oldone, newone in zip(old, new):
+             key = f"{oldone} -> {newone}"
+             transitions[key] = transitions.get(key, 0) + 1
+         
+         nodes = sorted(list(set(old + new)))
+         
+         # Create a dictionary to store the migration counts for each original class
+         migration_counts = {node: [transitions.get(f"{node} -> {n}", 0) for n in nodes] for node in nodes}
+         
+         # Create the Grouped Bar chart
+         grouped_bar = go.Figure()
+         for i, node in enumerate(nodes):
+             grouped_bar.add_trace(go.Bar(
+                 x=[f"{node} -> {n}" for n in nodes],
+                 y=migration_counts[node],
+                 name=f"Original Class {node}",
+             ))
+         
+         # Anpassung der Layout-Eigenschaften
+         grouped_bar.update_layout(
+             title='Migration between Clusters',
+             xaxis_title="Changes",
+             yaxis_title="Count",
+             font=dict(size=10),
+         )
+         
+         grouped_bar.show()
+         
+         output_file = self.path + "migration_diagram_grouped_bar.html"
+         pyo.plot(grouped_bar, filename=output_file, auto_open=False)
         
 class CustomDataset(Dataset):
     """
@@ -605,9 +638,9 @@ class Custom_nn(nn.Module):
                  
                 optimizer.zero_grad()
                 y_pred = self(X_batch)
-                loss = loss_fn(y_pred, y_batch.reshape(-1,1))
+                loss = loss_fn(y_pred, y_batch.unsqueeze(1))
                 loss = torch.mean(loss * weights_batch)
-                
+                loss_print = loss.clone()
                 # Elastic Net regularization (L1 + L2)
                 l1_regularization = torch.tensor(0., dtype=torch.float64)
                 for param in self.parameters():
@@ -641,14 +674,14 @@ class Custom_nn(nn.Module):
                     y_targets = torch.cat(y_targets, dim=0)
     
     
-                    loss_val = loss_fn(y_preds, y_targets.reshape(-1,1))
+                    loss_val = loss_fn(y_preds, y_targets.unsqueeze(1))
                     loss_val = float(loss_val.mean())
                     history.append(loss_val)
                     if loss_val < best_score:
                         best_score = loss_val
                         best_weights = copy.deepcopy(self.state_dict())
             if (verbose == True) and (epoch % 5 == 0):
-                print(f"Epoch: {epoch}, Train_Loss: {loss}, Val_Loss: {loss_val}")
+                print(f"Epoch: {epoch}, Train_Loss: {loss_print}, Val_Loss: {loss_val}")
         if valid_loader is not None:
             self.load_state_dict(best_weights)
         return history, best_score
@@ -698,9 +731,9 @@ class Gate_nn(Custom_nn):
                 optimizer.zero_grad()
 
                 y_pred = self(X_batch_gate, X_batch_expert)
-                loss = loss_fn(y_pred, y_batch_gate.reshape(-1,1))
+                loss = loss_fn(y_pred, y_batch_gate.unsqueeze(1))
                 loss = torch.mean(loss * weights_batch_gate)
-                
+                loss_print = loss.clone()
                 # Elastic Net regularization (L1 + L2)
                 l1_regularization = torch.tensor(0., dtype=torch.float64)
                 for param in self.parameters():
@@ -734,14 +767,14 @@ class Gate_nn(Custom_nn):
                     y_preds = torch.cat(y_preds, dim=0)
                     y_targets = torch.cat(y_targets, dim=0)
     
-                    loss_val = loss_fn(y_preds, y_targets.reshape(-1,1))
+                    loss_val = loss_fn(y_preds, y_targets.unsqueeze(1))
                     loss_val = float(loss_val.mean())
                     history.append(loss_val)
                     if loss_val < best_score:
                         best_score = loss_val
                         best_weights = copy.deepcopy(self.state_dict())
             if (verbose == True) and (epoch % 5 == 0):
-                print(f"Epoch: {epoch}, Train_Loss: {loss}, Val_Loss: {loss_val}")
+                print(f"Epoch: {epoch}, Train_Loss: {loss_print}, Val_Loss: {loss_val}")
         if valid_loader_gate is not None:
             self.load_state_dict(best_weights)
         return history, best_score
@@ -753,14 +786,18 @@ class Gate_nn(Custom_nn):
 
 if __name__ == "__main__":
     
-    result_path = r"D:\Github_Projects\MOE_Training_under_Uncertainty"
+    result_path = r"D:\Github_Projects\MOE_Training_under_Uncertainty\MoE"
     #data loading and preprocessing: 
-    data = fetch_california_housing()
+    data_cal = fetch_california_housing()
+    indices = np.arange(data_cal.data.shape[0])
+    np.random.shuffle(indices)
+    data = data_cal.data[indices]
+    target = data_cal.target[indices]
     
     
-    size = 500
-    data_sc = MinMaxScaler().fit_transform(data.data[:size])
-    target = data.target[:size]
+    size = 200
+    data_sc = MinMaxScaler().fit_transform(data[:size])
+    target = target[:size]
     
     # split
     data_train, data_test, target_train, target_test = train_test_split(data_sc, target, test_size=0.2, random_state=42)
@@ -779,22 +816,79 @@ if __name__ == "__main__":
     # MoE
     moe = MoE(2, inputsize=8, outputsize=1)
     # val
-    moe.fit(X_train, target_train, X_val, target_val, threshold_samples=0.8, local_mode = False, weighted_experts=True, 
-            verbose=True, batch_size_experts=1, batch_size_gate=1, n_epochs=20, n_samples=400)
+    moe.fit(X_train, target_train, X_val, target_val, threshold_samples=0.8, local_mode = True, weighted_experts=True, 
+            verbose=True, batch_size_experts=4, batch_size_gate=4, n_epochs=80, n_samples=400, lr = 0.01, reg_lambda=0.002, reg_alpha = 0.8)
   
     # predictions / eval
     predictions = moe.predict(data_test)
-    score = moe.evaluation(target_test)
+    score = moe.evaluation(predictions, target_test)
     print(f"score: {score}")
     
     moe.analyze(data_train, save_path = result_path)
     
     
     
+    ############################ Referenz MoE #############################################################
     
+    result_path = r"D:\Github_Projects\MOE_Training_under_Uncertainty\Ref_MoE"
+    ref_train = uf.uframe()
+    ref_train.append(X_train.mode())   
+    
+    
+    # MoE
+    moe = MoE(2, inputsize=8, outputsize=1)
+    # val
+    moe.fit(ref_train, target_train, X_val, target_val, threshold_samples=1, local_mode = False, weighted_experts = False, 
+            verbose=True, batch_size_experts=5, batch_size_gate=5, n_epochs=20, n_samples=1, reg_lambda=0.0005, reg_alpha = 0.8)
+  
+    # predictions / eval
+    predictions_ref = moe.predict(data_test)
+    score = moe.evaluation(predictions_ref, target_test)
+    print(f"Ref score: {score}")
+    
+    moe.analyze(data_train, save_path = result_path)
 
 
         
+    import plotly.graph_objects as go
+    import plotly.offline as pyo
     
+    alte_klasse = [1, 2, 3, 1, 2, 1, 2, 1, 2]
+    neue_klasse = [2, 3, 1, 2, 3, 1, 3, 1, 2]
+    
+    transitions = {}
+    for alte, neue in zip(alte_klasse, neue_klasse):
+        key = f"{alte} -> {neue}"
+        transitions[key] = transitions.get(key, 0) + 1
+    
+    nodes = sorted(list(set(alte_klasse + neue_klasse)))
+    
+    # Create a dictionary to store the migration counts for each original class
+    migration_counts = {node: [transitions.get(f"{node} -> {n}", 0) for n in nodes] for node in nodes}
+    
+    # Create the Grouped Bar chart
+    grouped_bar = go.Figure()
+    for i, node in enumerate(nodes):
+        grouped_bar.add_trace(go.Bar(
+            x=[f"{node} -> {n}" for n in nodes],
+            y=migration_counts[node],
+            name=f"Original Class {node}",
+        ))
+    
+    # Anpassung der Layout-Eigenschaften
+    grouped_bar.update_layout(
+        title='Migration zwischen Klassen',
+        xaxis_title="Übergänge",
+        yaxis_title="Anzahl",
+        font=dict(size=10),
+    )
+    
+    grouped_bar.show()
+    
+    output_file = "migration_diagram_grouped_bar.html"
+    pyo.plot(grouped_bar, filename=output_file, auto_open=False)
+
+
+
 
 
