@@ -6,7 +6,7 @@ from sklearn.cluster import KMeans
 import torch.nn as nn
 import torch
 import torch.optim as optim
-from sklearn.metrics import mean_squared_error
+from sklearn.metrics import mean_squared_error, accuracy_score
 from tqdm import tqdm
 from scipy.optimize import basinhopping
 from scipy.spatial.distance import cdist
@@ -14,6 +14,8 @@ from torch.utils.data import DataLoader, Dataset
 import copy
 import warnings
 from sklearn.model_selection import train_test_split
+import matplotlib.pyplot as plt
+from matplotlib.backends.backend_pdf import PdfPages
 
 
 class MoE(): 
@@ -100,7 +102,7 @@ class MoE():
         # load data for expert and gate
         test_dataset_expert = CustomDataset(test_data)
         test_loader_expert = DataLoader(test_dataset_expert, batch_size = self.batch_size_gate)
-        test_data_gate = np.concatenate((test_data,prob_dist_test), axis=1)
+        test_data_gate = np.concatenate((test_data, prob_dist_test), axis=1)
         test_dataset_gate = CustomDataset(test_data_gate)
         test_loader_gate = DataLoader(test_dataset_gate, batch_size = self.batch_size_gate)
         
@@ -111,7 +113,7 @@ class MoE():
             X_batch_expert, y_batch_expert, weights_batch_expert = data_expert
             
             self.predictions.extend(self.gate.forward(X_batch_gate, X_batch_expert).detach().numpy())
-        print("Finished predicting")
+
         return self.predictions
         
         
@@ -188,6 +190,7 @@ class MoE():
         self.train_data = train_data
         self.verbose = verbose
         self.batch_size_gate = batch_size_gate
+        self.local_mode = local_mode
         # Get Information about Prediction Task
         self.task, input_size, output_size = self.__get_task_type(train_data, np.array(train_target))
         # binary classification
@@ -211,18 +214,18 @@ class MoE():
 
 
         # distribution of probability mass after clustering
-        prob_dist_train = self.__prob_mass_cluster(self.n_experts, labels_sample,  int(n_samples * threshold_samples))
+        self.prob_dist_train = self.__prob_mass_cluster(self.n_experts, labels_sample,  int(n_samples * threshold_samples))
         
             
         
         # Search the local Mode Value for dominante Cluster and order every instance to the coresponding expert
         if local_mode == True:
             # local mode
-             train_data_local =  self.__local_cluster_mode(train_data, prob_dist_train)
-             train_loader_list_experts = self.__divide_dataset_for_experts(train_data_local, train_target, prob_dist_train, self.n_experts, batch_size = batch_size_experts, weighted_experts = weighted_experts)
+             self.train_data_local =  self.__local_cluster_mode(train_data, self.prob_dist_train)
+             train_loader_list_experts = self.__divide_dataset_for_experts(self.train_data_local, train_target, self.prob_dist_train, self.n_experts, batch_size = batch_size_experts, weighted_experts = weighted_experts)
         else:
             # global mode
-            train_loader_list_experts = self.__divide_dataset_for_experts(train_data.mode(), train_target, prob_dist_train, self.n_experts, batch_size = batch_size_experts, weighted_experts = weighted_experts)
+            train_loader_list_experts = self.__divide_dataset_for_experts(train_data.mode(), train_target, self.prob_dist_train, self.n_experts, batch_size = batch_size_experts, weighted_experts = weighted_experts)
         
         # Validation Data 
         if valid_data is not None:
@@ -246,12 +249,11 @@ class MoE():
         # Train Gate
         
         # Load Global Mode Train und Validation Set for Training of Gate
-        train_loader_expert, train_loader_gate, valid_loader_expert, valid_loader_gate = self.__datasets_for_gate(train_data.mode(), train_target, prob_dist_train, valid_data, valid_target,
+        train_loader_expert, train_loader_gate, valid_loader_expert, valid_loader_gate = self.__datasets_for_gate(train_data.mode(), train_target, self.prob_dist_train, valid_data, valid_target,
                                                                                                                   prob_dist_valid, batch_size = self.batch_size_gate, weighted_gate = weighted_gate)
         
 
         self.gate.train_model(train_loader_expert, train_loader_gate, valid_loader_expert, valid_loader_gate, n_epochs, loss_fn, weighted_gate, lr, reg_alpha, reg_lambda, verbose)
-        print("Finished training")
 
     
     def __clustering(self, n_experts, sampled_data):
@@ -410,16 +412,84 @@ class MoE():
    
         
     def evaluation(self, true_targets):
-        if self.task == 1:
-            score = 0 
-        elif self.task == 2:
-            score = 0
+        if self.task in (1,2):
+            score = accuracy_score(true_targets, self.predictions) * 100
         else:
             score = mean_squared_error(true_targets, self.predictions)
         
         return score
     
+    def analyze(self, data_certain, save_path):
+        self.save_path = save_path + str("Moe_analysis.pdf")
+        
+        labels_certain = self.__clustering(self.n_experts, data_certain)
+        print(labels_certain)
+        prob_dist_certain = self.__prob_mass_cluster(self.n_experts, labels_certain)
+            
+        self.__analyze_clustering(prob_dist_certain, self.prob_dist_train)
+        
     
+    def __analyze_clustering(self, prob_dist_certain, prob_dist_global):
+        num_clusters = len(prob_dist_certain[0])  # Number of clusters
+        cluster_accuracies_global = np.zeros(num_clusters)
+        dominant_clusters_certain = np.argmax(prob_dist_certain, axis=1)
+        dominant_clusters_global = np.argmax(prob_dist_global, axis=1)
+        
+        if self.local_mode:
+            labels_local_mode = self.__clustering(self.n_experts, self.data_local_mode)
+            prob_dist_local_mode = self.__prob_mass_cluster(self.n_experts, labels_local_mode)
+            dominant_clusters_local = np.argmax(prob_dist_local_mode, axis=1)
+            cluster_accuracies_local = np.zeros(num_clusters)
+        
+        for cluster in range(num_clusters):
+            cluster_indices = np.where(dominant_clusters_certain == cluster)[0]
+            correct_predictions_global = np.sum(dominant_clusters_global[cluster_indices] == cluster)
+            cluster_accuracy_global = correct_predictions_global / len(cluster_indices)
+            cluster_accuracies_global[cluster] = cluster_accuracy_global
+            
+            if self.local_mode:
+                correct_predictions_local = np.sum(dominant_clusters_local[cluster_indices] == cluster)
+                cluster_accuracy_local = correct_predictions_local / len(cluster_indices)
+                cluster_accuracies_local[cluster] = cluster_accuracy_local
+    
+        # Calculate the weighted average of cluster accuracies for global and local modes
+        weighted_average_global = accuracy_score(dominant_clusters_certain, dominant_clusters_global)
+        if self.local_mode:
+            weighted_average_local = accuracy_score(dominant_clusters_certain, dominant_clusters_local)
+    
+        # Plot the cluster accuracies for the global mode as a bar chart
+        plt.figure(figsize=(10, 6))
+        plt.bar(range(num_clusters), cluster_accuracies_global, color='blue', alpha=0.7)
+        plt.axhline(y=weighted_average_global, color='r', linestyle='--', label='Weighted Average (Global)')
+        plt.xlabel('Cluster')
+        plt.ylabel('Accuracy')
+        plt.title(f'Global - Cluster Assignment Accuracy (Average: {weighted_average_global:.2f})')
+        plt.legend()
+        plt.xticks(range(num_clusters))
+        
+        # Save the global mode plot to PDF
+        with PdfPages(self.save_path) as pdf:
+            pdf.savefig()
+            plt.close()
+        
+        if self.local_mode:
+            # Plot the cluster accuracies for the local mode as a bar chart
+            plt.figure(figsize=(10, 6))
+            plt.bar(range(num_clusters), cluster_accuracies_local, color='green', alpha=0.7)
+            plt.axhline(y=weighted_average_local, color='r', linestyle='--', label='Weighted Average (Local)')
+            plt.xlabel('Cluster')
+            plt.ylabel('Accuracy')
+            plt.title(f'Local - Cluster Assignment Accuracy (Average: {weighted_average_local:.2f})')
+            plt.legend()
+            plt.xticks(range(num_clusters))
+            
+            # Save the local mode plot to the existing PDF
+            with PdfPages(self.save_path) as pdf:
+                pdf.savefig()
+                plt.close()
+        
+        
+        
 class CustomDataset(Dataset):
     """
     Custom Dataset Class, which is able to process X, y and the weights of the instances
@@ -628,7 +698,7 @@ class Gate_nn(Custom_nn):
                 optimizer.zero_grad()
 
                 y_pred = self(X_batch_gate, X_batch_expert)
-                loss = loss_fn(y_pred, y_batch_gate)
+                loss = loss_fn(y_pred, y_batch_gate.reshape(-1,1))
                 loss = torch.mean(loss * weights_batch_gate)
                 
                 # Elastic Net regularization (L1 + L2)
@@ -664,7 +734,7 @@ class Gate_nn(Custom_nn):
                     y_preds = torch.cat(y_preds, dim=0)
                     y_targets = torch.cat(y_targets, dim=0)
     
-                    loss_val = loss_fn(y_preds, y_targets)
+                    loss_val = loss_fn(y_preds, y_targets.reshape(-1,1))
                     loss_val = float(loss_val.mean())
                     history.append(loss_val)
                     if loss_val < best_score:
@@ -683,11 +753,12 @@ class Gate_nn(Custom_nn):
 
 if __name__ == "__main__":
     
+    result_path = r"D:\Github_Projects\MOE_Training_under_Uncertainty"
     #data loading and preprocessing: 
     data = fetch_california_housing()
-
     
-    size = 2000
+    
+    size = 500
     data_sc = MinMaxScaler().fit_transform(data.data[:size])
     target = data.target[:size]
     
@@ -699,8 +770,8 @@ if __name__ == "__main__":
     
 
     #uncertainty in data 
-    X_train = uf.uframe_from_array_mice_2(data_train, kernel = "gaussian" , p =.01, mice_iterations = 2)
-    X_val = uf.uframe_from_array_mice_2(data_val, kernel = "gaussian" , p =.01, mice_iterations = 2)
+    X_train = uf.uframe_from_array_mice_2(data_train, kernel = "gaussian" , p =.2, mice_iterations = 2)
+    X_val = uf.uframe_from_array_mice_2(data_val, kernel = "gaussian" , p =.2, mice_iterations = 2)
     # X.analysis(X_train, save= "filename", bins = 20)
 
     
@@ -708,12 +779,22 @@ if __name__ == "__main__":
     # MoE
     moe = MoE(2, inputsize=8, outputsize=1)
     # val
-    moe.fit(X_train, target_train, X_val, target_val, threshold_samples=.6, local_mode = True, weighted_experts=False, 
-            verbose=True, batch_size_experts=3, batch_size_gate=12)
+    moe.fit(X_train, target_train, X_val, target_val, threshold_samples=0.8, local_mode = False, weighted_experts=True, 
+            verbose=True, batch_size_experts=1, batch_size_gate=1, n_epochs=20, n_samples=400)
   
     # predictions / eval
     predictions = moe.predict(data_test)
     score = moe.evaluation(target_test)
     print(f"score: {score}")
+    
+    moe.analyze(data_train, save_path = result_path)
+    
+    
+    
+    
+
+
+        
+    
 
 
