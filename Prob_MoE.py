@@ -322,13 +322,15 @@ class MoE():
                     closest_cluster = np.argmin(distances)
                     # Find the closest point and get its cluster label
                     
-                    return -kde.pdf(inst.reshape(1,-1)) if closest_cluster == cluster else 0 # np.inf
-
-                optimize_modal = basinhopping(lambda x: objective_function(x = x, cluster = cluster, kde = data.data[i], instance = instance, missing_dims = missing_dims, centroids = self.kmeans.cluster_centers_), x0=cluster_centers, minimizer_kwargs=minimizer_kwargs, niter=15, stepsize=0.2)                                    
-                modal_values = optimize_modal.x.tolist()
-                # print(instance)
-                for dim, modal_value in zip(missing_dims, modal_values):
-                    data_local_mode[i][dim] = modal_value
+                    return -kde.pdf(inst.reshape(1,-1)) if closest_cluster == cluster else np.inf
+                with warnings.catch_warnings():
+                    # deactivate warning about optimizer np.inf error
+                    warnings.filterwarnings("ignore", category=RuntimeWarning)
+                    optimize_modal = basinhopping(lambda x: objective_function(x = x, cluster = cluster, kde = data.data[i], instance = instance, missing_dims = missing_dims, centroids = self.kmeans.cluster_centers_), x0=cluster_centers, minimizer_kwargs=minimizer_kwargs, niter=15, stepsize=0.2)                                    
+                    modal_values = optimize_modal.x.tolist()
+                    # print(instance)
+                    for dim, modal_value in zip(missing_dims, modal_values):
+                        data_local_mode[i][dim] = modal_value
         return data_local_mode
         
     def __get_task_type(self, X, y):
@@ -412,7 +414,7 @@ class MoE():
         
     def evaluation(self, predictions, true_targets):
         if self.task in (1,2):
-            score = accuracy_score(true_targets, predictions) * 100
+            score = accuracy_score(true_targets, np.round(predictions, 0)) * 100
         else:
             score = mean_squared_error(true_targets, predictions)
         
@@ -424,7 +426,8 @@ class MoE():
         prob_dist_certain = self.__prob_mass_cluster(self.n_experts, labels_certain)
             
         dominant_clusters_local, dominant_clusters_global = self.__analyze_clustering(prob_dist_certain, self.prob_dist_train)
-        self.__cluster_change(dominant_clusters_local, dominant_clusters_global)
+        if self.local_mode:
+            self.__cluster_change(dominant_clusters_local, dominant_clusters_global)
     
     def __analyze_clustering(self, prob_dist_certain, prob_dist_global):
         num_clusters = len(prob_dist_certain[0])  # Number of clusters
@@ -531,7 +534,7 @@ class CustomDataset(Dataset):
         #to torch tensors
         self.X = torch.tensor(X, dtype=torch.float64)
         if task in (1, 2):
-            self.y = torch.tensor(y, dtype=torch.long)
+            self.y = torch.tensor(y, dtype=torch.float64)
         elif task == 3:
             self.y = torch.tensor(y, dtype=torch.float64)
         else:
@@ -614,11 +617,11 @@ class Custom_nn(nn.Module):
 
     def forward(self, x):
         # binary
-        if self.task == 1: 
-            return torch.sigmoid(self.stacked_layers(x))
+        if self.task == 1:
+            return nn.Sigmoid()(self.stacked_layers(x))
         # multiclass
         if self.task == 2: 
-            return torch.nn.Softmax(dim=1)(self.stacked_layers(x))
+            return nn.Softmax(dim=1)(self.stacked_layers(x))
         # regression
         if self.task == 3: 
             return self.stacked_layers(x)
@@ -637,6 +640,7 @@ class Custom_nn(nn.Module):
                  
                 optimizer.zero_grad()
                 y_pred = self(X_batch)
+
                 loss = loss_fn(y_pred, y_batch.unsqueeze(1))
                 loss = torch.mean(loss * weights_batch)
                 loss_print = loss.clone()
@@ -672,7 +676,7 @@ class Custom_nn(nn.Module):
                     y_preds = torch.cat(y_preds, dim=0)
                     y_targets = torch.cat(y_targets, dim=0)
     
-    
+                    # print(f" {y_preds.shape} (y_preds), {y_targets.unsqueeze(1).shape} (y_targets)")
                     loss_val = loss_fn(y_preds, y_targets.unsqueeze(1))
                     loss_val = float(loss_val.mean())
                     history.append(loss_val)
@@ -730,7 +734,7 @@ class Gate_nn(Custom_nn):
                 optimizer.zero_grad()
 
                 y_pred = self(X_batch_gate, X_batch_expert)
-                loss = loss_fn(y_pred, y_batch_gate.unsqueeze(1))
+                loss = loss_fn(y_pred, y_batch_gate)
                 loss = torch.mean(loss * weights_batch_gate)
                 loss_print = loss.clone()
                 # Elastic Net regularization (L1 + L2)
@@ -765,8 +769,8 @@ class Gate_nn(Custom_nn):
     
                     y_preds = torch.cat(y_preds, dim=0)
                     y_targets = torch.cat(y_targets, dim=0)
-    
-                    loss_val = loss_fn(y_preds, y_targets.unsqueeze(1))
+                    # print(f"{y_preds.shape} (y_preds), {y_targets.unsqueeze(1).shape} (y_targets)")
+                    loss_val = loss_fn(y_preds, y_targets)
                     loss_val = float(loss_val.mean())
                     history.append(loss_val)
                     if loss_val < best_score:

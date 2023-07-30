@@ -28,19 +28,18 @@ def preprocess_data(dataset = None):
     if dataset == "diabetes":
         data = pd.read_csv(data_path + "\\" + dataset + ".csv") 
         X = data.drop(columns='Outcome')
-        y = data["Outcome"]
-        y = y.reset_index(drop=True)
+        y = np.array(data["Outcome"].reset_index(drop=True))
         input_size = X.shape[1]
-        output_size = 2
+        output_size = 1
     elif dataset == "breast_cancer":
         data = pd.read_csv(data_path + "\\" + dataset + ".csv") 
         data.drop(columns=["id"],axis=1,inplace=True)
         X = data.drop(columns='diagnosis')
         y = data["diagnosis"]
         y = y.reset_index(drop=True)
-        y = y.map({'M': 0, 'B': 1})
+        y = np.array(y.map({'M': 0, 'B': 1}))
         input_size = X.shape[1]
-        output_size = 2
+        output_size = 1
     elif dataset == "california":
         data = fetch_california_housing()
         indices = np.arange(data.data.shape[0])
