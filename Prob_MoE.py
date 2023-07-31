@@ -533,9 +533,7 @@ class CustomDataset(Dataset):
         
         #to torch tensors
         self.X = torch.tensor(X, dtype=torch.float64)
-        if task in (1, 2):
-            self.y = torch.tensor(y, dtype=torch.float64)
-        elif task == 3:
+        if task in (1, 2, 3):
             self.y = torch.tensor(y, dtype=torch.float64)
         else:
             self.y = torch.tensor(np.zeros(len(X)), dtype=torch.float64)
@@ -621,7 +619,7 @@ class Custom_nn(nn.Module):
             return nn.Sigmoid()(self.stacked_layers(x))
         # multiclass
         if self.task == 2: 
-            return nn.Softmax(dim=1)(self.stacked_layers(x))
+            return torch.argmax(nn.Softmax(dim=1)(self.stacked_layers(x)), dim=1).to(torch.float64).unsqueeze(1)
         # regression
         if self.task == 3: 
             return self.stacked_layers(x)
@@ -640,7 +638,6 @@ class Custom_nn(nn.Module):
                  
                 optimizer.zero_grad()
                 y_pred = self(X_batch)
-
                 loss = loss_fn(y_pred, y_batch.unsqueeze(1))
                 loss = torch.mean(loss * weights_batch)
                 loss_print = loss.clone()

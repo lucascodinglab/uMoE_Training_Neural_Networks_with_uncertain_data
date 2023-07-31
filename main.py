@@ -14,7 +14,7 @@ import uframe as uf
 if __name__ == "__main__":
     
     dataset = "breast_cancer"
-    result_path = r"D:\Github_Projects\MOE_Training_under_Uncertainty"
+    result_path = r"D:\Github_Projects\Evaluation"
     # load data
     data, target, input_size, output_size = ut.preprocess_data(dataset = dataset)
     
@@ -29,24 +29,25 @@ if __name__ == "__main__":
     data_train, data_val, target_train, target_val = train_test_split(data_train, target_train, test_size=0.25, random_state=42)   
     
     # uncertainty in data 
-    X_train = uf.uframe_from_array_mice_2(data_train, kernel = "gaussian" , p =.3, mice_iterations = 2, bandwidth = "silverman")
-    X_val = uf.uframe_from_array_mice_2(data_val, kernel = "gaussian" , p =.3, mice_iterations = 2, bandwidth = "silverman")
+    X_train = uf.uframe_from_array_mice_2(data_train, kernel = "gaussian" , p =.7, mice_iterations = 2, bandwidth = 0.1)
+    X_val = uf.uframe_from_array_mice_2(data_val, kernel = "gaussian" , p =.7, mice_iterations = 2, bandwidth = 0.1)
     # X.analysis(X_train, save= "filename", bins = 20)
     
     ############################ MoE #############################################################
     
-    result_path_moe = result_path + "\MoE"
+    result_path_moe = result_path + "\MoE_0.1"
     
     # MoE
     moe = pm.MoE(2, inputsize = input_size, outputsize = output_size)
     # val
-    moe.fit(X_train, target_train, X_val, target_val, threshold_samples=0.3, local_mode = True, weighted_experts=True, 
-            verbose=False, batch_size_experts=5, batch_size_gate=5, n_epochs=60, n_samples=400, lr = 0.0001, reg_lambda=0.0002, reg_alpha = 0.8)
+    moe.fit(X_train, target_train, X_val, target_val, threshold_samples=0.1, local_mode = True, weighted_experts=True, 
+            verbose=False, batch_size_experts=5, batch_size_gate=5, n_epochs=60, n_samples=400, lr = 0.001, reg_lambda=0.0002, reg_alpha = 0.8)
       
     # predictions / eval
     predictions = moe.predict(data_test)
     score = moe.evaluation(predictions, target_test)
     print(f"Prob MoE score: {score}")
+
     
     moe.analyze(data_train, save_path = result_path_moe)
     
@@ -60,7 +61,7 @@ if __name__ == "__main__":
     
     
     # Ref MoE
-    ref_moe = pm.MoE(3, inputsize = input_size, outputsize = output_size)
+    ref_moe = pm.MoE(2, inputsize = input_size, outputsize = output_size)
     # val
     ref_moe.fit(ref_train, target_train, X_val, target_val, threshold_samples=1, local_mode = False, weighted_experts = False, 
             verbose=False, batch_size_experts=5, batch_size_gate=5, n_epochs=80, n_samples=1, lr = 0.001, reg_lambda=0.0002, reg_alpha = 0.8)
@@ -93,9 +94,14 @@ if __name__ == "__main__":
     
     
     
+    ###########################################################################################################################
     
+    
+    
+
         
-    
+            
+        
     
     
     

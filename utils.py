@@ -1,6 +1,8 @@
 import numpy as np
 import pandas as pd
 from sklearn.datasets import fetch_california_housing
+import matplotlib.pyplot as plt
+import os
 
 
 def preprocess_data(dataset = None):
@@ -104,3 +106,59 @@ def preprocess_data(dataset = None):
         
         
     return X, y, input_size, output_size
+
+
+
+def compare_scores(score_moe_list, score_ref_moe_list, score_ref_nn_list, expert_range, save_path, dataset, missing):
+    """
+    Compare the scores of MoE and reference models and create a plot.
+
+    Parameters
+    ----------
+    score_moe_list : list
+        List of scores for MoE model for different numbers of experts.
+    score_ref_moe_list : list
+        List of scores for reference MoE model for different numbers of experts.
+    score_ref_nn_list : list
+        List of scores for reference NN model.
+    expert_range : list
+        List of integers representing the number of experts used.
+    save_path : str
+        Location where plot will be saved (including the folder path).
+    dataset: str
+        Name of the dataset
+    Missing: float
+        Percentage of Missing Values
+
+    Returns
+    -------
+    None
+        The function creates a plot to compare the scores.
+    """
+    plt.figure(figsize=(10, 6))
+    plt.plot(expert_range, score_moe_list, marker='o', label='MoE')
+    plt.plot(expert_range, score_ref_moe_list, marker='o', label='Reference MoE')
+    plt.plot(expert_range, [score_ref_nn_list[0]] * len(expert_range), linestyle='--', marker='o', label='Reference NN')
+
+    plt.xlabel('Number of Experts')
+    plt.ylabel('Score')
+    plt.title('Comparison of MoE and Reference Scores for {}, Missing: {}'.format(dataset, missing))
+    plt.xticks(expert_range)
+    plt.legend()
+    plt.grid(True)
+
+    # Remove the backslash from the beginning of save_path
+    save_path = save_path.lstrip(os.path.sep)
+
+    # Create the full file path using os.path.join
+    filename = os.path.join(save_path, "Scores of {} Missing {}.png".format(dataset.replace(":", "_"), missing))
+    plt.savefig(filename)
+    plt.show()
+    plt.close()
+
+
+
+
+if __name__ == "__main__":
+    
+    pass
