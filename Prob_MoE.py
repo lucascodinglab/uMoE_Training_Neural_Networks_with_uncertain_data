@@ -437,7 +437,7 @@ class MoE():
         
         if self.local_mode:
             labels_local_mode = self.pred_clusters(self.train_data_local)
-            prob_dist_local_mode = self.__prob_mass_cluster(self.n_experts, labels_local_mode)
+            prob_dist_local_mode = self.__prob_mass_cluster(self.n_experts, labels_local_mode, n_samples = 1)
             dominant_clusters_local = np.argmax(prob_dist_local_mode, axis=1)
             cluster_accuracies_local = np.zeros(num_clusters)
         

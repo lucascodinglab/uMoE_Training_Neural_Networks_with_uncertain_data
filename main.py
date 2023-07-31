@@ -20,7 +20,7 @@ if __name__ == "__main__":
     
     
     size = 565
-    data_sc = StandardScaler().fit_transform(data[:size])
+    data_sc = MinMaxScaler().fit_transform(data[:size])
     target = target[:size]
     
     # split
@@ -29,8 +29,8 @@ if __name__ == "__main__":
     data_train, data_val, target_train, target_val = train_test_split(data_train, target_train, test_size=0.25, random_state=42)   
     
     # uncertainty in data 
-    X_train = uf.uframe_from_array_mice_2(data_train, kernel = "gaussian" , p =.5, mice_iterations = 2)
-    X_val = uf.uframe_from_array_mice_2(data_val, kernel = "gaussian" , p =.5, mice_iterations = 2)
+    X_train = uf.uframe_from_array_mice_2(data_train, kernel = "gaussian" , p =.3, mice_iterations = 2, bandwidth = "silverman")
+    X_val = uf.uframe_from_array_mice_2(data_val, kernel = "gaussian" , p =.3, mice_iterations = 2, bandwidth = "silverman")
     # X.analysis(X_train, save= "filename", bins = 20)
     
     ############################ MoE #############################################################
@@ -40,13 +40,13 @@ if __name__ == "__main__":
     # MoE
     moe = pm.MoE(2, inputsize = input_size, outputsize = output_size)
     # val
-    moe.fit(X_train, target_train, X_val, target_val, threshold_samples=0.7, local_mode = True, weighted_experts=True, 
-            verbose=False, batch_size_experts=4, batch_size_gate=4, n_epochs=50, n_samples=300, lr = 0.001, reg_lambda=0.0002, reg_alpha = 0.8)
+    moe.fit(X_train, target_train, X_val, target_val, threshold_samples=0.3, local_mode = True, weighted_experts=True, 
+            verbose=False, batch_size_experts=5, batch_size_gate=5, n_epochs=60, n_samples=400, lr = 0.0001, reg_lambda=0.0002, reg_alpha = 0.8)
       
     # predictions / eval
     predictions = moe.predict(data_test)
     score = moe.evaluation(predictions, target_test)
-    print(f"score: {score}")
+    print(f"Prob MoE score: {score}")
     
     moe.analyze(data_train, save_path = result_path_moe)
     
@@ -60,10 +60,10 @@ if __name__ == "__main__":
     
     
     # Ref MoE
-    ref_moe = pm.MoE(2, inputsize = input_size, outputsize = output_size)
+    ref_moe = pm.MoE(3, inputsize = input_size, outputsize = output_size)
     # val
     ref_moe.fit(ref_train, target_train, X_val, target_val, threshold_samples=1, local_mode = False, weighted_experts = False, 
-            verbose=False, batch_size_experts=5, batch_size_gate=5, n_epochs=50, n_samples=1, lr = 0.001, reg_lambda=0.0002, reg_alpha = 0.8)
+            verbose=False, batch_size_experts=5, batch_size_gate=5, n_epochs=80, n_samples=1, lr = 0.001, reg_lambda=0.0002, reg_alpha = 0.8)
       
     # predictions / eval
     predictions_ref = ref_moe.predict(data_test)
@@ -84,7 +84,7 @@ if __name__ == "__main__":
     nn = pm.MoE(1, inputsize = input_size, outputsize = output_size, hidden_experts = [64, 64, 64],  hidden_gate=[1])
     # val
     nn.fit(ref_train, target_train, X_val, target_val, threshold_samples=1, local_mode = False, weighted_experts = False, 
-            verbose=False, batch_size_experts=5, batch_size_gate=5, n_epochs=50, n_samples=1, lr = 0.001, reg_lambda=0.0002, reg_alpha = 0.8)
+            verbose=True, batch_size_experts=5, batch_size_gate=10, n_epochs=50, n_samples=1, lr = 0.001, reg_lambda=0.0003, reg_alpha = 0.8)
       
     # predictions / eval
     predictions_ref = nn.predict(data_test)
