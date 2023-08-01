@@ -323,6 +323,7 @@ class MoE():
                     # Find the closest point and get its cluster label
                     
                     return -kde.pdf(inst.reshape(1,-1)) if closest_cluster == cluster else np.inf
+                
                 with warnings.catch_warnings():
                     # deactivate warning about optimizer np.inf error
                     warnings.filterwarnings("ignore", category=RuntimeWarning)
@@ -425,20 +426,24 @@ class MoE():
         labels_certain = self.pred_clusters(data_certain)
         prob_dist_certain = self.__prob_mass_cluster(self.n_experts, labels_certain)
             
-        dominant_clusters_local, dominant_clusters_global = self.__analyze_clustering(prob_dist_certain, self.prob_dist_train)
+        dominant_clusters_local, dominant_clusters_global = self.__analyze_clustering(prob_dist_certain)
         if self.local_mode:
             self.__cluster_change(dominant_clusters_local, dominant_clusters_global)
     
-    def __analyze_clustering(self, prob_dist_certain, prob_dist_global):
+    def __analyze_clustering(self, prob_dist_certain):
         num_clusters = len(prob_dist_certain[0])  # Number of clusters
         cluster_accuracies_global = np.zeros(num_clusters)
         dominant_clusters_certain = np.argmax(prob_dist_certain, axis=1)
-        dominant_clusters_global = np.argmax(prob_dist_global, axis=1)
         
+        # global clustering
+        labels_global_mode = self.pred_clusters(self.train_data.mode())
+        prob_dist_global_mode = self.__prob_mass_cluster(self.n_experts, labels_global_mode, n_samples = 1)
+        dominant_clusters_global = np.argmax(prob_dist_global_mode, axis=1)
+                
         if self.local_mode:
-            labels_local_mode = self.pred_clusters(self.train_data_local)
-            prob_dist_local_mode = self.__prob_mass_cluster(self.n_experts, labels_local_mode, n_samples = 1)
-            dominant_clusters_local = np.argmax(prob_dist_local_mode, axis=1)
+            dominant_clusters_local = self.pred_clusters(self.train_data_local)
+            # prob_dist_local_mode = self.__prob_mass_cluster(self.n_experts, labels_local_mode, n_samples = 1)
+            # dominant_clusters_local = np.argmax(prob_dist_local_mode, axis=1)
             cluster_accuracies_local = np.zeros(num_clusters)
         
         for cluster in range(num_clusters):
@@ -448,9 +453,9 @@ class MoE():
             cluster_accuracies_global[cluster] = cluster_accuracy_global
             
             if self.local_mode:
-                correct_predictions_local = np.sum(dominant_clusters_local[cluster_indices] == cluster)
-                cluster_accuracy_local = correct_predictions_local / len(cluster_indices)
-                cluster_accuracies_local[cluster] = cluster_accuracy_local
+               correct_predictions_local = np.sum(dominant_clusters_local[cluster_indices] == cluster)
+               cluster_accuracy_local = correct_predictions_local / len(cluster_indices)
+               cluster_accuracies_local[cluster] = cluster_accuracy_local
     
         # Calculate the weighted average of cluster accuracies for global and local modes
         weighted_average_global = accuracy_score(dominant_clusters_certain, dominant_clusters_global)
