@@ -31,7 +31,7 @@ if __name__ == "__main__":
     kf = KFold(n_splits=n_folds, shuffle=True, random_state=42)
     
     # Uframe
-    X = uf.uframe_from_array_mice_2(data_sc, kernel = "gaussian" , p =.1, mice_iterations = 2, bandwidth = 0.1)
+    X = uf.uframe_from_array_mice_2(data_sc, kernel = "gaussian" , p = missing, mice_iterations = 2, bandwidth = 0.1)
 
     # select parameters
     n_experten_max = 4
