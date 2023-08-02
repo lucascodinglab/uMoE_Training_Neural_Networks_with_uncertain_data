@@ -5,7 +5,7 @@ import matplotlib.pyplot as plt
 import os
 
 
-def preprocess_data(dataset = None):
+def preprocess_data(data_path = None, dataset = None):
     """
     Preprocesses the specified dataset and returns the preprocessed data along with input and output sizes.
 
@@ -42,7 +42,7 @@ def preprocess_data(dataset = None):
     If the dataset name is not provided or not recognized, the function returns None for all outputs.
 
     """
-    data_path = r"D:\Github_Projects\Datasets"
+    data_path = data_path
     if dataset == "diabetes":
         data = pd.read_csv(data_path + "\\" + dataset + ".csv") 
         X = data.drop(columns='Outcome')
