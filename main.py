@@ -14,9 +14,11 @@ import uframe as uf
 if __name__ == "__main__":
     
     dataset = "breast_cancer"
+    data_path = r"C:\Users\lul03615\Datasets"
+    # data_path = r"D:\Github_Projects\Datasets"
     result_path = r"D:\Github_Projects\Evaluation"
     # load data
-    data, target, input_size, output_size = ut.preprocess_data(dataset = dataset)
+    data, target, input_size, output_size = ut.preprocess_data(data_path = data_path, dataset = dataset)
     
     
     size = 400
