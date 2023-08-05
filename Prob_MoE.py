@@ -15,6 +15,7 @@ import matplotlib.pyplot as plt
 from matplotlib.backends.backend_pdf import PdfPages
 import plotly.graph_objects as go
 import plotly.offline as pyo
+import os
 
 
 class MoE(): 
@@ -116,8 +117,7 @@ class MoE():
         return predictions
         
         
-        
-        
+    
     
     def fit(self, train_data, train_target, valid_data = None, 
             valid_target = None, reg_alpha = 0.5, reg_lambda = 0.0003, 
@@ -261,6 +261,7 @@ class MoE():
         Input: n_experts (size of cluster), sampled_data (samples of Train Data), Valid_data
         Ouput: labels of Clustering (array)
         """
+        os.environ["OMP_NUM_THREADS"] = "2" #KMeans
         cluster_distribution = np.empty(())
         self.kmeans = KMeans(n_init = 10, n_clusters = n_experts, random_state = 1).fit(sampled_data)
 
@@ -269,22 +270,27 @@ class MoE():
         return self.kmeans.predict(newdata)
 
             
-    def __prob_mass_cluster(self, n_experts, labels, n_samples = 1):
+    def __prob_mass_cluster(self, n_experts, labels, n_samples=1):
         """
         Function: Get Probability Distribution across Clusters
-        Input: n_experts, labels (train,val,test), n_samples
+        Input: n_experts, labels (train, val, test), n_samples
         Output: prob_dist (Distribution of Probability Mass across Clusters in One-Hot-Encoded (ndarray))
         """
         num_sections = len(labels) // n_samples
         prob_dist = np.zeros((num_sections, n_experts))
-        
+    
         for i in range(num_sections):
             section = labels[i * n_samples : (i + 1) * n_samples]
             unique_cluster, counts = np.unique(section, return_counts=True)
             relative_frequency = counts / len(section)
-            prob_dist[i][unique_cluster - 1] = relative_frequency
-        return prob_dist
     
+            # Initialize the prob_dist row with the correct ordering of relative frequencies
+            for j, cluster_id in enumerate(range(n_experts)):
+                if cluster_id in unique_cluster:
+                    prob_dist[i][j] = relative_frequency[np.where(unique_cluster == cluster_id)][0]
+    
+        return prob_dist
+        
     
     def __local_cluster_mode(self, data, prob_dist):
         """
@@ -414,6 +420,26 @@ class MoE():
    
         
     def evaluation(self, predictions, true_targets):
+        """
+        Evaluates the performance of the predictions against the true targets based on the model's task.
+    
+        Parameters
+        ----------
+        predictions : array-like
+            Predicted values obtained from the model.
+        true_targets : array-like
+            True target values (ground truth).
+    
+        Returns
+        -------
+        score : float
+            The evaluation score representing the performance of the predictions.
+    
+        Notes
+        -----
+        The method evaluates the performance of the model's predictions against the true targets
+        based on the task type of the model.
+        """
         if self.task in (1,2):
             score = accuracy_score(true_targets, np.round(predictions, 0)) * 100
         else:
@@ -422,28 +448,37 @@ class MoE():
         return score
     
     def analyze(self, data_certain, save_path):
+        """
+        Analyze the clustering results and generate plots.
+    
+        Parameters
+        ----------
+        data_certain : np.array
+            Data used for certain prediction.
+        save_path : str
+            Location where the analysis plots will be saved (including the folder path).
+    
+        Returns
+        -------
+    
+        """
+        
         self.save_path = save_path + str("_analysis.pdf")
         labels_certain = self.pred_clusters(data_certain)
-        prob_dist_certain = self.__prob_mass_cluster(self.n_experts, labels_certain)
             
-        dominant_clusters_local, dominant_clusters_global = self.__analyze_clustering(prob_dist_certain)
+        dominant_clusters_local, dominant_clusters_global = self.__analyze_clustering(labels_certain)
         if self.local_mode:
             self.__cluster_change(dominant_clusters_local, dominant_clusters_global)
     
-    def __analyze_clustering(self, prob_dist_certain):
-        num_clusters = len(prob_dist_certain[0])  # Number of clusters
+    def __analyze_clustering(self, dominant_clusters_certain):
+        num_clusters = self.n_experts  # Number of clusters
         cluster_accuracies_global = np.zeros(num_clusters)
-        dominant_clusters_certain = np.argmax(prob_dist_certain, axis=1)
-        
+
         # global clustering
-        labels_global_mode = self.pred_clusters(self.train_data.mode())
-        prob_dist_global_mode = self.__prob_mass_cluster(self.n_experts, labels_global_mode, n_samples = 1)
-        dominant_clusters_global = np.argmax(prob_dist_global_mode, axis=1)
-                
+        dominant_clusters_global = self.pred_clusters(self.train_data.mode())
+
         if self.local_mode:
             dominant_clusters_local = self.pred_clusters(self.train_data_local)
-            # prob_dist_local_mode = self.__prob_mass_cluster(self.n_experts, labels_local_mode, n_samples = 1)
-            # dominant_clusters_local = np.argmax(prob_dist_local_mode, axis=1)
             cluster_accuracies_local = np.zeros(num_clusters)
         
         for cluster in range(num_clusters):
@@ -790,5 +825,29 @@ class Gate_nn(Custom_nn):
 
 
 if __name__ == "__main__":
+    def prob_mass_cluster(n_experts, labels, n_samples=1):
+        """
+        Function: Get Probability Distribution across Clusters
+        Input: n_experts, labels (train, val, test), n_samples
+        Output: prob_dist (Distribution of Probability Mass across Clusters in One-Hot-Encoded (ndarray))
+        """
+        num_sections = len(labels) // n_samples
+        prob_dist = np.zeros((num_sections, n_experts))
     
-    pass
+        for i in range(num_sections):
+            section = labels[i * n_samples : (i + 1) * n_samples]
+            unique_cluster, counts = np.unique(section, return_counts=True)
+            relative_frequency = counts / len(section)
+    
+            # Initialize the prob_dist row with the correct ordering of relative frequencies
+            for j, cluster_id in enumerate(range(n_experts)):
+                if cluster_id in unique_cluster:
+                    prob_dist[i][j] = relative_frequency[np.where(unique_cluster == cluster_id)][0]
+    
+        return prob_dist
+    
+
+        
+    
+    
+  
