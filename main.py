@@ -13,30 +13,30 @@ import uframe as uf
 
 if __name__ == "__main__":
     
-    dataset = "california"
+    dataset = "wifi"
     # data_path = r"C:\Users\lul03615\Datasets"
     data_path = r"D:\Github_Projects\Datasets"
-    result_path = r"D:\Github_Projects\Evaluation\california\0.7"
+    result_path = r"D:\Github_Projects\Evaluation\wifi\Silverman"
     # load data
     data, target, input_size, output_size, score_type = ut.preprocess_data(data_path = data_path, dataset=dataset)
     
     
-    size = 2000
+    size = len(data)
     data_sc = MinMaxScaler().fit_transform(data[:size])
     target = target[:size]
     
     
     # select setting
-    missing = 0.7
-    bandwidth = 0.1
+    missing = 0.5
+    bandwidth = 0.01
     n_experts_max = 6
     # select parameters
-    lr = 0.0008
+    lr = 0.001
     reg_lambda = 0.0002
-    batch_size_experts = 3
-    batch_size_gate = 3
+    batch_size_experts = 5
+    batch_size_gate = 5
     n_epochs = 50
-    threshold_samples = 0.3 # our method
+    threshold_samples = 0.5 # our method
     n_samples = 200 # our method
     local_mode = True # our method
     
@@ -77,7 +77,7 @@ if __name__ == "__main__":
         print(f"Prob MoE score: {score_moe}")
         score_moe_list.append(score_moe)
         # analyze
-        result_path_moe = result_path + "\MoE" + "_" + dataset + "_" + str(missing) + "_" + str(n)
+        result_path_moe = result_path + "\MoE" + "_" + dataset + "_" + str(missing) + "_" + str(n) + "_" + str(bandwidth)
         moe.analyze(data_train, save_path = result_path_moe)    
         
         ############################ Referenz MoE #############################################################
@@ -96,7 +96,7 @@ if __name__ == "__main__":
         print(f"Ref MoE score: {score_ref_moe}")
         score_ref_moe_list.append(score_ref_moe)
         # analyze
-        result_path_moe_ref = result_path + "\Ref_MoE" + "_" + dataset + "_" + str(missing) + "_" + str(n)
+        result_path_moe_ref = result_path + "\Ref_MoE" + "_" + dataset + "_" + str(missing) + "_" + str(n) + "_" + str(bandwidth)
         ref_moe.analyze(data_train, save_path = result_path_moe_ref)
 
 

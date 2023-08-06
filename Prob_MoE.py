@@ -4,6 +4,7 @@ from sklearn.cluster import KMeans
 import torch.nn as nn
 import torch
 import torch.optim as optim
+import torch.nn.functional as F
 from sklearn.metrics import mean_squared_error, accuracy_score
 from tqdm import tqdm
 from scipy.optimize import basinhopping
@@ -190,6 +191,7 @@ class MoE():
         self.verbose = verbose
         self.batch_size_gate = batch_size_gate
         self.local_mode = local_mode
+        
         # Get Information about Prediction Task
         self.task, input_size, output_size = self.__get_task_type(train_data, np.array(train_target))
         # binary classification
@@ -203,8 +205,6 @@ class MoE():
             loss_fn = nn.MSELoss(reduction = "none")
         # sampling of KDE and Restriction of samples
         sampled_data = train_data.sample(n_samples,seed = seed, threshold = threshold_samples)
-        # sampled_data = train_data.sample(n_samples,seed = seed)
-
         # clustering
         self.__clustering(self.n_experts, sampled_data)
         
@@ -215,7 +215,6 @@ class MoE():
         # distribution of probability mass after clustering
         self.prob_dist_train = self.__prob_mass_cluster(self.n_experts, labels_sample,  int(n_samples * threshold_samples))
         
-            
         
         # Search the local Mode Value for dominante Cluster and order every instance to the coresponding expert
         if local_mode == True:
@@ -252,7 +251,7 @@ class MoE():
                                                                                                                   prob_dist_valid, batch_size = self.batch_size_gate, weighted_gate = weighted_gate)
         
 
-        self.gate.train_model(train_loader_expert, train_loader_gate, valid_loader_expert, valid_loader_gate, n_epochs, loss_fn, weighted_gate, lr, reg_alpha, reg_lambda, verbose)
+        self.gate.train_model(train_loader_expert, train_loader_gate, valid_loader_expert, valid_loader_gate, n_epochs, loss_fn, weighted_gate, lr, reg_alpha, reg_lambda, verbose, self.task)
 
     
     def __clustering(self, n_experts, sampled_data):
@@ -347,11 +346,11 @@ class MoE():
         num_unique_values = len(np.unique(y))
         input_size = X.mode().shape[1]
         # binary classification
-        if num_unique_values == 2:
+        if num_unique_values == 2 and self.outputsize == 1:
             return 1, input_size, num_unique_values 
         # multiclass classification
-        elif num_unique_values > 2 and num_unique_values <= 20:
-            return 2, input_size, num_unique_values
+        elif self.outputsize > 1:
+            return 2, input_size, self.outputsize
         # regression
         else:
             return 3, input_size, 1
@@ -659,7 +658,7 @@ class Custom_nn(nn.Module):
             return nn.Sigmoid()(self.stacked_layers(x))
         # multiclass
         if self.task == 2: 
-            return torch.argmax(nn.Softmax(dim=1)(self.stacked_layers(x)), dim=1).to(torch.float64).unsqueeze(1)
+            return nn.Softmax(dim=1)(self.stacked_layers(x))
         # regression
         if self.task == 3: 
             return self.stacked_layers(x)
@@ -678,8 +677,14 @@ class Custom_nn(nn.Module):
                  
                 optimizer.zero_grad()
                 y_pred = self(X_batch)
-                loss = loss_fn(y_pred, y_batch.unsqueeze(1))
-                loss = torch.mean(loss * weights_batch)
+                # print(f"y_pred {y_pred}, y_pred.shape {y_pred.shape},\n y_batch {y_batch}, y_batch.shape {y_batch.shape}")
+                if self.task in (1,3): # 1-D
+                    loss = loss_fn(y_pred, y_batch.unsqueeze(1))
+                    loss = torch.mean(loss * weights_batch)
+                else: # n-D
+                    loss = loss_fn(y_pred, y_batch)
+                    loss = torch.mean(loss * weights_batch.unsqueeze(1))
+                # print(f"loss {loss}, weights_batch {weights_batch}")
                 loss_print = loss.clone()
                 # Elastic Net regularization (L1 + L2)
                 l1_regularization = torch.tensor(0., dtype=torch.float64)
@@ -714,7 +719,10 @@ class Custom_nn(nn.Module):
                     y_targets = torch.cat(y_targets, dim=0)
     
                     # print(f" {y_preds.shape} (y_preds), {y_targets.unsqueeze(1).shape} (y_targets)")
-                    loss_val = loss_fn(y_preds, y_targets.unsqueeze(1))
+                    if self.task in (1,3):
+                        loss_val = loss_fn(y_preds, y_targets.unsqueeze(1))
+                    else:
+                        loss_val = loss_fn(y_preds, y_targets)
                     loss_val = float(loss_val.mean())
                     history.append(loss_val)
                     if loss_val < best_score:
@@ -731,9 +739,8 @@ class Gate_nn(Custom_nn):
     """
     Subclass of Custom_nn used for training of the Gate Unit
     """
-    def __init__(self, inputs, outputs, hidden=[64, 64], activation=nn.ReLU(), dropout=0, trained_experts_list = None, task = 3):
+    def __init__(self, inputs, outputs, hidden=[64, 64], activation=nn.ReLU(), dropout=0, trained_experts_list = None):
         super(Gate_nn, self).__init__(inputs, outputs, hidden, activation, dropout)
-        self.task = task
         self.trained_experts_list = nn.ModuleList(trained_experts_list)
 
     def forward(self, inputs_gate, inputs_expert):
@@ -750,12 +757,17 @@ class Gate_nn(Custom_nn):
             expert_outputs_weighted += expert_output * gate_output[:, i:i+1]
             expert_outputs.append(expert_output)
             expert_weights.append(gate_output[:, i:i+1])
-
-        output = expert_outputs_weighted.sum(dim=1)
         
+        if self.task in (1,3):
+            output = expert_outputs_weighted.sum(dim=1)
+        else:
+            norm_weights = torch.sum(expert_outputs_weighted, dim=1, keepdim=True)
+            output = expert_outputs_weighted / norm_weights
+            
         return output
     
-    def train_model(self, train_loader_expert, train_loader_gate, valid_loader_expert, valid_loader_gate, n_epochs, loss_fn, weighted_loss, lr, reg_alpha, reg_lambda, verbose):
+    def train_model(self, train_loader_expert, train_loader_gate, valid_loader_expert, valid_loader_gate, n_epochs, loss_fn, weighted_loss, lr, reg_alpha, reg_lambda, verbose, task):
+        self.task = task
         best_score = np.inf
         best_weights = None
         history = []
@@ -825,26 +837,8 @@ class Gate_nn(Custom_nn):
 
 
 if __name__ == "__main__":
-    def prob_mass_cluster(n_experts, labels, n_samples=1):
-        """
-        Function: Get Probability Distribution across Clusters
-        Input: n_experts, labels (train, val, test), n_samples
-        Output: prob_dist (Distribution of Probability Mass across Clusters in One-Hot-Encoded (ndarray))
-        """
-        num_sections = len(labels) // n_samples
-        prob_dist = np.zeros((num_sections, n_experts))
-    
-        for i in range(num_sections):
-            section = labels[i * n_samples : (i + 1) * n_samples]
-            unique_cluster, counts = np.unique(section, return_counts=True)
-            relative_frequency = counts / len(section)
-    
-            # Initialize the prob_dist row with the correct ordering of relative frequencies
-            for j, cluster_id in enumerate(range(n_experts)):
-                if cluster_id in unique_cluster:
-                    prob_dist[i][j] = relative_frequency[np.where(unique_cluster == cluster_id)][0]
-    
-        return prob_dist
+    pass
+
     
 
         

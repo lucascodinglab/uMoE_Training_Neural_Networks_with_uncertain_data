@@ -123,6 +123,13 @@ def preprocess_data(data_path = None, dataset = None):
         input_size = X.shape[1]
         output_size = 4
         score_type = "Accuracy"
+    elif dataset == "banana":
+        data = pd.read_csv(data_path + "\\" + dataset + ".csv")
+        X = data.drop(columns="Class", axis=1).values
+        y = np.array(data["Class"].map({-1: 0, 1:1}))
+        input_size = X.shape[1]
+        output_size = 1
+        score_type = "Accuracy"
      
     if output_size > 1:
         label_encoder = LabelEncoder()
