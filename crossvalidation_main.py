@@ -42,7 +42,7 @@ if __name__ == "__main__":
     # Uframe
     X = uf.uframe_from_array_mice_2(data_sc, kernel = "gaussian" , p = missing, mice_iterations = 2, bandwidth = bandwidth)
     # X.analysis(X_train, save= dataset, bins = 20)
-
+    X_object = X.mode()
 
     ################################################## Crossvalidation ########################################################
     indices = np.arange(len(data_sc))
@@ -66,7 +66,7 @@ if __name__ == "__main__":
             target_train = target[train_indices]
             X_val = X[val_indices]
             target_val = target[val_indices]
-            data_test = data[test_indices]
+            data_test = data_sc[test_indices]
             target_test = target[test_indices]
             # global mode value for reference methods
             ref_train = uf.uframe()

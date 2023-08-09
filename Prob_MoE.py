@@ -61,7 +61,7 @@ class MoE():
     to leverage the power of the Mixture of Experts model for accurate predictions and meaningful uncertainty
     estimates.
     """
-    def __init__(self, n_experts, hidden_experts = [64,64], hidden_gate = [64,64], dropout = 0, inputsize = 1, outputsize = 1, probs_to_gate = True) : 
+    def __init__(self, n_experts, inputsize, outputsize, hidden_experts = [64,64], hidden_gate = [64,64], dropout = 0, probs_to_gate = True): 
     
         self.n_experts = n_experts 
         self.hidden_experts = hidden_experts
@@ -124,18 +124,18 @@ class MoE():
             valid_target = None, reg_alpha = 0.5, reg_lambda = 0.0003, 
             lr = 0.001, n_epochs = 100, batch_size_experts = 4, 
             batch_size_gate = 8, local_mode = True, n_samples = 100, 
-            threshold_samples = .5, weighted_experts = True, 
+            threshold_samples = .25, weighted_experts = True, 
             weighted_gate = False, verbose = False, seed = None): 
         """
         Train the Mixture of Experts (MoE) model using the provided training data and target values.
         
         Parameters:
         -----------
-        train_data : ndarray
+        train_data : Uframe Object
             The input training data to be used for training the MoE model. The shape of the array should be (n_samples, n_features).
         train_target : ndarray
             The target values corresponding to the training data. The shape of the array should be (n_samples,) for classification tasks, or (n_samples, 1) for regression tasks.
-        valid_data : ndarray, optional
+        valid_data : Uframe Object, optional
             The optional validation data to be used for monitoring the model's performance during training. The shape of the array should be (n_samples, n_features). Default is None.
         valid_target : ndarray, optional
             The optional target values corresponding to the validation data. The shape of the array should be (n_samples,) for classification tasks, or (n_samples, 1) for regression tasks. Default is None.
@@ -194,6 +194,13 @@ class MoE():
         
         # Get Information about Prediction Task
         self.task, input_size, output_size = self.__get_task_type(train_data, np.array(train_target))
+        # Check if the task is multi-class classification (task == 2) and validate target format
+        if self.task == 2:
+            if train_target.ndim <= 1:
+                raise ValueError("For multi-class classification (task == 2), train_target must be one-hot encoded.")
+            if valid_target is not None and valid_target.ndim <= 1:
+                raise ValueError("For multi-class classification (task == 2), valid_target must be one-hot encoded.")
+
         # binary classification
         if self.task == 1:
             loss_fn = nn.BCELoss(reduction = "none") 
@@ -253,7 +260,7 @@ class MoE():
 
         self.gate.train_model(train_loader_expert, train_loader_gate, valid_loader_expert, valid_loader_gate, n_epochs, loss_fn, weighted_gate, lr, reg_alpha, reg_lambda, verbose, self.task)
 
-    
+
     def __clustering(self, n_experts, sampled_data):
         """
         Function: Clustering of samples to decompose the input space for the experts
@@ -300,7 +307,11 @@ class MoE():
         
         data_local_mode = data.mode().copy()
         dominant_cluster = np.argmax(prob_dist, axis=1)
-        for i, instance in tqdm(enumerate(data_local_mode), total=len(data_local_mode), desc="Search Local Cluster Mode"):
+        if self.verbose:
+            iterator = tqdm(enumerate(data_local_mode), total=len(data_local_mode), desc="Search Local Cluster Mode")
+        else:
+            iterator = enumerate(data_local_mode)
+        for i, instance in iterator:
             missing_dims = data.data[i].indices[1]
             cluster = dominant_cluster[i]
             if len(missing_dims) > 0:
@@ -332,7 +343,7 @@ class MoE():
                 with warnings.catch_warnings():
                     # deactivate warning about optimizer np.inf error
                     warnings.filterwarnings("ignore", category=RuntimeWarning)
-                    optimize_modal = basinhopping(lambda x: objective_function(x = x, cluster = cluster, kde = data.data[i], instance = instance, missing_dims = missing_dims, centroids = self.kmeans.cluster_centers_), x0=cluster_centers, minimizer_kwargs=minimizer_kwargs, niter=15, stepsize=0.2)                                    
+                    optimize_modal = basinhopping(lambda x: objective_function(x = x, cluster = cluster, kde = data.data[i], instance = instance, missing_dims = missing_dims, centroids = self.kmeans.cluster_centers_), x0=cluster_centers, minimizer_kwargs=minimizer_kwargs)                                    
                     modal_values = optimize_modal.x.tolist()
                     # print(instance)
                     for dim, modal_value in zip(missing_dims, modal_values):
