@@ -21,7 +21,7 @@ if __name__ == "__main__":
     data, target, input_size, output_size, score_type = ut.preprocess_data(data_path = data_path, dataset=dataset)
     
     
-    size = len(data)
+    size = 100
     data_sc = MinMaxScaler().fit_transform(data[:size])
     target = target[:size]
     
@@ -68,7 +68,7 @@ if __name__ == "__main__":
         moe = pm.MoE(n, inputsize = input_size, outputsize = output_size, hidden_experts = [32, 32], hidden_gate = [32, 32])
         # val
         moe.fit(X_train, target_train, X_val, target_val, threshold_samples=threshold_samples, local_mode = local_mode, weighted_experts=True, 
-                verbose=True, batch_size_experts=batch_size_experts, batch_size_gate=batch_size_gate, n_epochs=n_epochs, 
+                verbose=False, batch_size_experts=batch_size_experts, batch_size_gate=batch_size_gate, n_epochs=n_epochs, 
                 n_samples=n_samples, lr = lr, reg_lambda=reg_lambda, reg_alpha = 0.5)
           
         # predictions / eval

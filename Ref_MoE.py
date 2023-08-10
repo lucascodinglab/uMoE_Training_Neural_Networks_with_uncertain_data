@@ -3,6 +3,8 @@ import numpy as np
 from sklearn.cluster import KMeans
 import torch.nn as nn
 import torch
+import torch.optim as optim
+import torch.nn.functional as F
 from sklearn.metrics import mean_squared_error, accuracy_score
 from tqdm import tqdm
 from scipy.optimize import basinhopping
@@ -59,7 +61,7 @@ class MoE():
     to leverage the power of the Mixture of Experts model for accurate predictions and meaningful uncertainty
     estimates.
     """
-    def __init__(self, n_experts, inputsize, outputsize, hidden_experts = [64,64], hidden_gate = [64,64], dropout = 0, probs_to_gate = True): 
+    def __init__(self, n_experts, inputsize, outputsize, hidden_experts = [64,64], hidden_gate = [64,64], dropout = 0): 
     
         self.n_experts = n_experts 
         self.hidden_experts = hidden_experts
@@ -67,7 +69,6 @@ class MoE():
         self.dropout = dropout 
         self.inputsize = inputsize
         self.outputsize = outputsize
-        self.probs_to_gate = probs_to_gate
         
         self._init_model()
         
@@ -94,22 +95,18 @@ class MoE():
         The final predictions are stored in the 'predictions' list.
         """
         
-        # cluster test data
-        labels_test = self.pred_clusters(test_data)
-        prob_dist_test = self.__prob_mass_cluster(self.n_experts, labels_test, n_samples = 1)
         
         # load data for expert and gate
         test_dataset_expert = CustomDataset(test_data)
         test_loader_expert = DataLoader(test_dataset_expert, batch_size = 10)
-        test_data_gate = np.concatenate((test_data, prob_dist_test), axis=1)
-        test_dataset_gate = CustomDataset(test_data_gate)
+        test_dataset_gate = CustomDataset(test_data)
         test_loader_gate = DataLoader(test_dataset_gate, batch_size = 10)
         
         # iterate through dataloader
         predictions = []
         for data_gate, data_expert in zip(test_loader_gate, test_loader_expert):
-            X_batch_gate, y_batch_gate, weights_batch_gate = data_gate
-            X_batch_expert, y_batch_expert, weights_batch_expert = data_expert
+            X_batch_gate, y_batch_gate = data_gate
+            X_batch_expert, y_batch_expert = data_expert
             
             predictions.extend(self.gate.forward(X_batch_gate, X_batch_expert).detach().numpy())
 
@@ -121,9 +118,7 @@ class MoE():
     def fit(self, train_data, train_target, valid_data = None, 
             valid_target = None, reg_alpha = 0.5, reg_lambda = 0.0003, 
             lr = 0.001, n_epochs = 100, batch_size_experts = 4, 
-            batch_size_gate = 8, local_mode = True, n_samples = 100, 
-            threshold_samples = .25, weighted_experts = True, 
-            weighted_gate = False, verbose = False, seed = None): 
+            batch_size_gate = 8, verbose = False, seed = None): 
         """
         Train the Mixture of Experts (MoE) model using the provided training data and target values.
         
@@ -148,17 +143,7 @@ class MoE():
         batch_size_experts : int, optional
             The batch size for training the individual expert models. Default is 4.
         batch_size_gate : int, optional
-            The batch size for training the gate model. Default is 8.
-        local_mode : bool, optional
-            A boolean flag indicating whether to use local mode for training. If True, the training data will be divided based on the dominant cluster of each instance. If False, global mode will be used, where all instances are used for training the experts. Default is True.
-        n_samples : int, optional
-            The number of samples to be used for training the MoE model in the case of local mode. Default is 100.
-        threshold_samples : float, optional
-            The threshold for selecting instances for training in the case of local mode. Only instances whose cluster probability is above this threshold will be used for training the experts. Default is 0.5.
-        weighted_experts : bool, optional
-            A boolean flag indicating whether to apply weights to the expert loss during training. If True, the losses of individual experts will be weighted based on the probability distribution of clusters. Default is True.
-        weighted_gate : bool, optional
-            A boolean flag indicating whether to apply weights to the gate loss during training. If True, the gate loss will be weighted based on the probability distribution of clusters. Default is False.
+            The batch size for training the gate model. Default is 8.           
         verbose : bool, optional
             A boolean flag indicating whether to print progress and training information during the training process. Default is False.
         seed : int, optional
@@ -172,15 +157,6 @@ class MoE():
         ------
         This function performs the following steps to train the MoE model:
         
-        1. Preprocess the input data and determine the prediction task type (binary classification, multi-class classification, or regression).
-        2. Sample data using Kernel Density Estimation (KDE) and restrict samples to maintain a manageable size.
-        3. Perform clustering on the sampled data to determine expert assignments for each instance.
-        4. Distribute the probability mass of clusters based on clustering results.
-        5. If local mode is enabled, use the dominant cluster to order instances for each corresponding expert. Otherwise, use global mode and directly divide the data for expert training.
-        6. Optionally, use validation data for monitoring the model's performance during training.
-        7. Train each expert model with the specified loss function, regularization, and optimization settings.
-        8. Train the gate model to combine the outputs of individual experts and perform predictions.
-        
         The function optimizes the parameters of the MoE model to best fit the training data and task type while considering the provided hyperparameters and settings.
         
         """
@@ -188,7 +164,6 @@ class MoE():
         self.train_data = train_data
         self.verbose = verbose
         self.batch_size_gate = batch_size_gate
-        self.local_mode = local_mode
         
         # Get Information about Prediction Task
         self.task, input_size, output_size = self.__get_task_type(train_data, np.array(train_target))
@@ -201,42 +176,27 @@ class MoE():
 
         # binary classification
         if self.task == 1:
-            loss_fn = nn.BCELoss(reduction = "none") 
+            loss_fn = nn.BCELoss() 
         # multi class classification
         elif self.task == 2:
-            loss_fn = nn.CrossEntropyLoss(reduction = "none")
+            loss_fn = nn.CrossEntropyLoss()
         # regression
         elif self.task == 3:
-            loss_fn = nn.MSELoss(reduction = "none")
-        # sampling of KDE and Restriction of samples
-        sampled_data = train_data.sample(n_samples,seed = seed, threshold = threshold_samples)
+            loss_fn = nn.MSELoss()
         # clustering
-        self.__clustering(self.n_experts, sampled_data)
+        self.__clustering(self.n_experts, train_data.mode())
         
         
-        labels_sample = self.pred_clusters(sampled_data)
+        labels_train = self.pred_clusters(train_data.mode())
 
 
-        # distribution of probability mass after clustering
-        self.prob_dist_train = self.__prob_mass_cluster(self.n_experts, labels_sample,  int(n_samples * threshold_samples))
-        
-        
-        # Search the local Mode Value for dominante Cluster and order every instance to the coresponding expert
-        if local_mode == True:
-            # local mode
-             self.train_data_local =  self.__local_cluster_mode(train_data, self.prob_dist_train)
-             train_loader_list_experts = self.__divide_dataset_for_experts(self.train_data_local, train_target, self.prob_dist_train, self.n_experts, batch_size = batch_size_experts, weighted_experts = weighted_experts)
-        else:
-            # global mode
-            train_loader_list_experts = self.__divide_dataset_for_experts(train_data.mode(), train_target, self.prob_dist_train, self.n_experts, batch_size = batch_size_experts, weighted_experts = weighted_experts)
+        train_loader_list_experts = self.__divide_dataset_for_experts(train_data.mode(), train_target, labels_train, self.n_experts, batch_size = batch_size_experts)
         
         # Validation Data 
         if valid_data is not None:
             labels_valid = self.pred_clusters(valid_data.mode())
-            prob_dist_valid = self.__prob_mass_cluster(self.n_experts, labels_valid)
-            valid_loader_list_experts_global = self.__divide_dataset_for_experts(valid_data.mode(), valid_target, prob_dist_valid, self.n_experts, batch_size = batch_size_experts, weighted_experts = None)
+            valid_loader_list_experts_global = self.__divide_dataset_for_experts(valid_data.mode(), valid_target, labels_valid, self.n_experts, batch_size = batch_size_experts)
         else:
-            prob_dist_valid = None
             valid_loader_list_experts_global = [None] * self.n_experts
             
             
@@ -245,18 +205,17 @@ class MoE():
         for i in range(self.n_experts):
             self.experts[i].task = self.task
             self.experts[i].train_model(train_loader = train_loader_list_experts[i], valid_loader = valid_loader_list_experts_global[i],
-                                        n_epochs = n_epochs, loss_fn = loss_fn, weighted_loss = weighted_experts, lr = lr, 
+                                        n_epochs = n_epochs, loss_fn = loss_fn, lr = lr, 
                                         reg_alpha = reg_alpha, reg_lambda = reg_lambda, verbose = self.verbose)   
         
         
         # Train Gate
         
         # Load Global Mode Train und Validation Set for Training of Gate
-        train_loader_expert, train_loader_gate, valid_loader_expert, valid_loader_gate = self.__datasets_for_gate(train_data.mode(), train_target, self.prob_dist_train, valid_data, valid_target,
-                                                                                                                  prob_dist_valid, batch_size = self.batch_size_gate, weighted_gate = weighted_gate)
+        train_loader_expert, train_loader_gate, valid_loader_expert, valid_loader_gate = self.__datasets_for_gate(train_data.mode(), train_target, valid_data, valid_target, batch_size = self.batch_size_gate)
         
 
-        self.gate.train_model(train_loader_expert, train_loader_gate, valid_loader_expert, valid_loader_gate, n_epochs, loss_fn, weighted_gate, lr, reg_alpha, reg_lambda, verbose, self.task)
+        self.gate.train_model(train_loader_expert, train_loader_gate, valid_loader_expert, valid_loader_gate, n_epochs, loss_fn, lr, reg_alpha, reg_lambda, verbose, self.task)
 
 
     def __clustering(self, n_experts, sampled_data):
@@ -364,55 +323,43 @@ class MoE():
             return 3, input_size, 1
         
         
-    def __divide_dataset_for_experts(self, X, y, prob_dist, n_experts, batch_size, weighted_experts):
+    def __divide_dataset_for_experts(self, X, y, dominant_cluster, n_experts, batch_size):
         """
         Function: Divides Dataset for Expert - Every Expert gets Instance, where most of the prob. Mass lies in
         Input: X (data), y(target), prob_dist(Distribution of Prob. Mass after Clustering of Samples), n_experts (number of experts)
         Output: data (list with dataloaders for every expert)
         """
-        dominant_cluster = np.argmax(prob_dist, axis=1)
         data = []
         for i in range(n_experts):
             indices = np.where(dominant_cluster == i)
             X_exp = X[indices]
             y_exp = y[indices]
             
-            if weighted_experts is False: 
-                # weights  = np.repeat(1, len(indices)).tolist()
-                weights = None
-            else: 
-                weights_exp = prob_dist[indices]
-                weights = np.max(weights_exp, axis=1).tolist()
-            dataset_expert = CustomDataset(X_exp, y_exp, weights, self.task)
+            dataset_expert = CustomDataset(X_exp, y_exp, self.task)
             loader_expert = DataLoader(dataset_expert, batch_size)
             data.append(loader_expert)
         return data
             
 
         
-    def __datasets_for_gate(self, train_data, train_target, prob_train, valid_data, valid_target, prob_valid, batch_size, weighted_gate):
+    def __datasets_for_gate(self, train_data, train_target, valid_data, valid_target, batch_size):
         """
         Function: Preprocessing Data for Gate Unit
         Output: train and validation data for Gate
         """
-        if weighted_gate is False: 
-            weights  = np.repeat(1, len(train_target)).tolist()
-        else: 
-            weights = np.max(prob_train, axis=1).tolist()
+
         # train gate
-        train_data_and_dist = np.concatenate((train_data, prob_train), axis=1)
-        train_dataset_gate = CustomDataset(train_data_and_dist, train_target, weights, self.task)
+        train_dataset_gate = CustomDataset(train_data, train_target,  self.task)
         train_loader_gate = DataLoader(train_dataset_gate, batch_size)
         # train expert
-        train_dataset_expert = CustomDataset(train_data, train_target, weights, self.task)
+        train_dataset_expert = CustomDataset(train_data, train_target, self.task)
         train_loader_expert = DataLoader(train_dataset_expert, batch_size)
         if valid_data is not None:
             # valid gate
-            valid_data_and_dist = np.concatenate((valid_data.mode(), prob_valid), axis=1)
-            valid_dataset_gate = CustomDataset(valid_data_and_dist, valid_target, weights = None, task = self.task)
+            valid_dataset_gate = CustomDataset(valid_data.mode(), valid_target,task = self.task)
             valid_loader_gate = DataLoader(valid_dataset_gate, batch_size)
             # valid expert
-            valid_dataset_expert = CustomDataset(valid_data.mode(), valid_target, weights = None, task = self.task)
+            valid_dataset_expert = CustomDataset(valid_data.mode(), valid_target, task = self.task)
             valid_loader_expert = DataLoader(valid_dataset_expert, batch_size)
             return train_loader_expert, train_loader_gate, valid_loader_expert, valid_loader_gate
         else:
@@ -422,7 +369,7 @@ class MoE():
     def _init_model(self):
     
         self.experts = [Custom_nn(inputs = self.inputsize,  outputs = self.outputsize, dropout = self.dropout) for i in range(self.n_experts)]
-        self.gate = Gate_nn(inputs = self.inputsize + self.n_experts, outputs = self.n_experts, 
+        self.gate = Gate_nn(inputs = self.inputsize, outputs = self.n_experts, 
                             dropout = self.dropout, trained_experts_list = self.experts)
    
         
@@ -473,10 +420,8 @@ class MoE():
         self.save_path = save_path + str("_analysis.pdf")
         labels_certain = self.pred_clusters(data_certain)
             
-        dominant_clusters_local, dominant_clusters_global = self.__analyze_clustering(labels_certain)
-        if self.local_mode:
-            self.__cluster_change(dominant_clusters_local, dominant_clusters_global)
-    
+        cluster_accuracies_global = self.__analyze_clustering(labels_certain)
+        return cluster_accuracies_global
     def __analyze_clustering(self, dominant_clusters_certain):
         num_clusters = self.n_experts  # Number of clusters
         cluster_accuracies_global = np.zeros(num_clusters)
@@ -484,9 +429,6 @@ class MoE():
         # global clustering
         dominant_clusters_global = self.pred_clusters(self.train_data.mode())
 
-        if self.local_mode:
-            dominant_clusters_local = self.pred_clusters(self.train_data_local)
-            cluster_accuracies_local = np.zeros(num_clusters)
         
         for cluster in range(num_clusters):
             cluster_indices = np.where(dominant_clusters_certain == cluster)[0]
@@ -494,16 +436,10 @@ class MoE():
             cluster_accuracy_global = correct_predictions_global / len(cluster_indices)
             cluster_accuracies_global[cluster] = cluster_accuracy_global
             
-            if self.local_mode:
-               correct_predictions_local = np.sum(dominant_clusters_local[cluster_indices] == cluster)
-               cluster_accuracy_local = correct_predictions_local / len(cluster_indices)
-               cluster_accuracies_local[cluster] = cluster_accuracy_local
     
         # Calculate the weighted average of cluster accuracies for global and local modes
         weighted_average_global = accuracy_score(dominant_clusters_certain, dominant_clusters_global)
-        if self.local_mode:
-            weighted_average_local = accuracy_score(dominant_clusters_certain, dominant_clusters_local)
-    
+
         # Save the plots to the PDF file
         with PdfPages(self.save_path) as pdf:
             # Plot the cluster accuracies for the global mode as a bar chart
@@ -519,84 +455,28 @@ class MoE():
             # Save the global mode plot to PDF
             pdf.savefig()
             plt.close()
-        
-            if self.local_mode:
-                # Plot the cluster accuracies for the local mode as a bar chart
-                plt.figure(figsize=(10, 6))
-                plt.bar(range(num_clusters), cluster_accuracies_local, color='green', alpha=0.7)
-                plt.axhline(y=weighted_average_local, color='r', linestyle='--', label='Weighted Average (Local)')
-                plt.xlabel('Cluster')
-                plt.ylabel('Accuracy')
-                plt.title(f'Local - Cluster Assignment Accuracy (Average: {weighted_average_local:.2f})')
-                plt.legend()
-                plt.xticks(range(num_clusters))
                 
-                # Save the local mode plot to PDF
-                pdf.savefig()
-                plt.close()
-        if self.local_mode:
-            return dominant_clusters_local, dominant_clusters_global
-        else:
-            return None, dominant_clusters_global
+        return weighted_average_global
                 
-    def __cluster_change(self, old, new):
-         transitions = {}
-         for oldone, newone in zip(old, new):
-             key = f"{oldone} -> {newone}"
-             transitions[key] = transitions.get(key, 0) + 1
-         
-         nodes = sorted(list(set(old + new)))
-         
-         # Create a dictionary to store the migration counts for each original class
-         migration_counts = {node: [transitions.get(f"{node} -> {n}", 0) for n in nodes] for node in nodes}
-         
-         # Create the Grouped Bar chart
-         grouped_bar = go.Figure()
-         for i, node in enumerate(nodes):
-             grouped_bar.add_trace(go.Bar(
-                 x=[f"{node} -> {n}" for n in nodes],
-                 y=migration_counts[node],
-                 name=f"Original Class {node}",
-             ))
-         
-         # Anpassung der Layout-Eigenschaften
-         grouped_bar.update_layout(
-             title='Migration between Clusters',
-             xaxis_title="Changes",
-             yaxis_title="Count",
-             font=dict(size=10),
-         )
-         
-         grouped_bar.show()
-         
-         output_file = self.save_path + "migration_diagram_grouped_bar.html"
-         pyo.plot(grouped_bar, filename=output_file, auto_open=False)
         
 class CustomDataset(Dataset):
     """
     Custom Dataset Class, which is able to process X, y and the weights of the instances
     """
-    def __init__(self, X, y = None, weights = None, task = None):
+    def __init__(self, X, y = None, task = None):
         
         #to torch tensors
         self.X = torch.tensor(X, dtype=torch.float64)
         if task in (1, 2, 3):
             self.y = torch.tensor(y, dtype=torch.float64)
         else:
-            self.y = torch.tensor(np.zeros(len(X)), dtype=torch.float64)
-        
-        #if None all = 1
-        
-        if weights == None: 
-            self.weights = torch.tensor(np.ones(len(X)), dtype=torch.float64)
-        else:
-            self.weights = torch.tensor(weights, dtype=torch.float64)
+            self.y = torch.tensor(np.zeros(len(X)), dtype=torch.float64)      
             
     def __len__(self):
         return len(self.y)
     
     def __getitem__(self, index):
-        return self.X[index], self.y[index], self.weights[index]
+        return self.X[index], self.y[index]
     
     
 
@@ -671,7 +551,7 @@ class Custom_nn(nn.Module):
         if self.task == 3: 
             return self.stacked_layers(x)
 
-    def train_model(self, train_loader, valid_loader, n_epochs, loss_fn, weighted_loss, lr, reg_alpha, reg_lambda, verbose):
+    def train_model(self, train_loader, valid_loader, n_epochs, loss_fn, lr, reg_alpha, reg_lambda, verbose):
         best_score = np.inf
         best_weights = None
         history = []
@@ -680,19 +560,16 @@ class Custom_nn(nn.Module):
             self.train()
             for i, data in enumerate(train_loader):
                 
-                X_batch, y_batch, weights_batch = data
+                X_batch, y_batch = data
                 # Convert input data to the same data type as the model's weights
                  
                 optimizer.zero_grad()
                 y_pred = self(X_batch)
                 # print(f"y_pred {y_pred}, y_pred.shape {y_pred.shape},\n y_batch {y_batch}, y_batch.shape {y_batch.shape}")
                 if self.task in (1,3): # 1-D
-                    loss = loss_fn(y_pred, y_batch.unsqueeze(1))
-                    loss = torch.mean(loss * weights_batch)
+                    loss = torch.mean(loss_fn(y_pred, y_batch.unsqueeze(1)))
                 else: # n-D
-                    loss = loss_fn(y_pred, y_batch)
-                    loss = torch.mean(loss * weights_batch.unsqueeze(1))
-                # print(f"loss {loss}, weights_batch {weights_batch}")
+                    loss = torch.mean(loss_fn(y_pred, y_batch))
                 loss_print = loss.clone()
                 # Elastic Net regularization (L1 + L2)
                 l1_regularization = torch.tensor(0., dtype=torch.float64)
@@ -704,8 +581,6 @@ class Custom_nn(nn.Module):
                     l2_regularization += torch.norm(param, p=2)
     
                 loss += reg_lambda * (reg_alpha * l1_regularization + (1 - reg_alpha) * l2_regularization) 
-
-                
                 loss.backward()
                 optimizer.step()
 
@@ -718,7 +593,7 @@ class Custom_nn(nn.Module):
                 with torch.no_grad():
                     y_preds = []
                     y_targets = []
-                    for X_val, y_val, weights_val in valid_loader:
+                    for X_val, y_val in valid_loader:
                         y_pred_val = self(X_val)
                         y_preds.append(y_pred_val)
                         y_targets.append(y_val)
@@ -774,7 +649,7 @@ class Gate_nn(Custom_nn):
             
         return output
     
-    def train_model(self, train_loader_expert, train_loader_gate, valid_loader_expert, valid_loader_gate, n_epochs, loss_fn, weighted_loss, lr, reg_alpha, reg_lambda, verbose, task):
+    def train_model(self, train_loader_expert, train_loader_gate, valid_loader_expert, valid_loader_gate, n_epochs, loss_fn, lr, reg_alpha, reg_lambda, verbose, task):
         self.task = task
         best_score = np.inf
         best_weights = None
@@ -783,8 +658,8 @@ class Gate_nn(Custom_nn):
         for epoch in range(n_epochs):
             self.train()
             for i, (data_expert, data_gate) in enumerate(zip(train_loader_expert, train_loader_gate)):
-                X_batch_gate, y_batch_gate, weights_batch_gate = data_gate
-                X_batch_expert, y_batch_expert, weights_batch_expert = data_expert
+                X_batch_gate, y_batch_gate = data_gate
+                X_batch_expert, y_batch_expert = data_expert
                 # Convert input data to the same data type as the model's weights
                 y_batch_gate = y_batch_gate.to(torch.float64)  
                  
@@ -792,7 +667,6 @@ class Gate_nn(Custom_nn):
 
                 y_pred = self(X_batch_gate, X_batch_expert)
                 loss = loss_fn(y_pred, y_batch_gate)
-                loss = torch.mean(loss * weights_batch_gate)
                 loss_print = loss.clone()
                 # Elastic Net regularization (L1 + L2)
                 l1_regularization = torch.tensor(0., dtype=torch.float64)
@@ -818,8 +692,8 @@ class Gate_nn(Custom_nn):
                     y_preds = []
                     y_targets = []
                     for (valid_data_expert),(valid_data_gate) in zip(valid_loader_expert, valid_loader_gate):
-                        X_val_expert, y_val_expert, weights_val_expert = valid_data_expert
-                        X_val_gate, y_val_gate, weights_val_gate = valid_data_gate
+                        X_val_expert, y_val_expert = valid_data_expert
+                        X_val_gate, y_val_gate = valid_data_gate
                         y_pred = self(X_val_gate, X_val_expert)
                         y_preds.append(y_pred)
                         y_targets.append(y_val_gate)
