@@ -565,12 +565,11 @@ class Custom_nn(nn.Module):
                  
                 optimizer.zero_grad()
                 y_pred = self(X_batch)
-                if self.task == 3: # 1-D
-                    loss = loss_fn(y_pred, y_batch.view(-1, 1))
-                elif self.task == 1:
-                    loss = loss_fn(y_pred, y_batch.unsqueeze(1))
+                # print(f"y_pred {y_pred}, y_pred.shape {y_pred.shape},\n y_batch {y_batch}, y_batch.shape {y_batch.shape}")
+                if self.task in (1,3): # 1-D
+                    loss = torch.mean(loss_fn(y_pred, y_batch.unsqueeze(1)))
                 else: # n-D
-                    loss = loss_fn(y_pred, y_batch)
+                    loss = torch.mean(loss_fn(y_pred, y_batch))
                 loss_print = loss.clone()
                 # Elastic Net regularization (L1 + L2)
                 l1_regularization = torch.tensor(0., dtype=torch.float64)
