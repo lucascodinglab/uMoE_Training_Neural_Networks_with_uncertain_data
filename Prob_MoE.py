@@ -184,7 +184,8 @@ class MoE():
         The function optimizes the parameters of the MoE model to best fit the training data and task type while considering the provided hyperparameters and settings.
         
         """
-        
+        init_normal(self.gate)
+        init_normal(self.experts)
         self.train_data = train_data
         self.verbose = verbose
         self.batch_size_gate = batch_size_gate
@@ -384,7 +385,7 @@ class MoE():
                 weights_exp = prob_dist[indices]
                 weights = np.max(weights_exp, axis=1).tolist()
             dataset_expert = CustomDataset(X_exp, y_exp, weights, self.task)
-            loader_expert = DataLoader(dataset_expert, batch_size)
+            loader_expert = DataLoader(dataset_expert, batch_size, shuffle=True)
             data.append(loader_expert)
         return data
             
@@ -402,18 +403,18 @@ class MoE():
         # train gate
         train_data_and_dist = np.concatenate((train_data, prob_train), axis=1)
         train_dataset_gate = CustomDataset(train_data_and_dist, train_target, weights, self.task)
-        train_loader_gate = DataLoader(train_dataset_gate, batch_size)
+        train_loader_gate = DataLoader(train_dataset_gate, batch_size, shuffle=True)
         # train expert
         train_dataset_expert = CustomDataset(train_data, train_target, weights, self.task)
-        train_loader_expert = DataLoader(train_dataset_expert, batch_size)
+        train_loader_expert = DataLoader(train_dataset_expert, batch_size, shuffle=True)
         if valid_data is not None:
             # valid gate
             valid_data_and_dist = np.concatenate((valid_data.mode(), prob_valid), axis=1)
             valid_dataset_gate = CustomDataset(valid_data_and_dist, valid_target, weights = None, task = self.task)
-            valid_loader_gate = DataLoader(valid_dataset_gate, batch_size)
+            valid_loader_gate = DataLoader(valid_dataset_gate, batch_size, shuffle=True)
             # valid expert
             valid_dataset_expert = CustomDataset(valid_data.mode(), valid_target, weights = None, task = self.task)
-            valid_loader_expert = DataLoader(valid_dataset_expert, batch_size)
+            valid_loader_expert = DataLoader(valid_dataset_expert, batch_size, shuffle=True)
             return train_loader_expert, train_loader_gate, valid_loader_expert, valid_loader_gate
         else:
             return train_loader_expert, train_loader_gate, None, None
@@ -685,14 +686,15 @@ class Custom_nn(nn.Module):
                  
                 optimizer.zero_grad()
                 y_pred = self(X_batch)
-                # print(f"y_pred {y_pred}, y_pred.shape {y_pred.shape},\n y_batch {y_batch}, y_batch.shape {y_batch.shape}")
-                if self.task in (1,3): # 1-D
+                if self.task == 3: # 1-D
+                    loss = loss_fn(y_pred, y_batch.view(-1, 1))
+                    loss = torch.mean(loss * weights_batch)
+                elif self.task == 1:
                     loss = loss_fn(y_pred, y_batch.unsqueeze(1))
                     loss = torch.mean(loss * weights_batch)
                 else: # n-D
                     loss = loss_fn(y_pred, y_batch)
                     loss = torch.mean(loss * weights_batch.unsqueeze(1))
-                # print(f"loss {loss}, weights_batch {weights_batch}")
                 loss_print = loss.clone()
                 # Elastic Net regularization (L1 + L2)
                 l1_regularization = torch.tensor(0., dtype=torch.float64)
@@ -840,7 +842,10 @@ class Gate_nn(Custom_nn):
         return history, best_score
 
 
-    
+def init_normal(module):
+    if type(module) == nn.Linear:
+        nn.init.normal_(module.weight, mean=0, std=1)
+        nn.init.zeros_(module.bias)    
     	
 
 

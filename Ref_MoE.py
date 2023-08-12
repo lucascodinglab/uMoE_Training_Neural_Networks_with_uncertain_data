@@ -336,7 +336,7 @@ class MoE():
             y_exp = y[indices]
             
             dataset_expert = CustomDataset(X_exp, y_exp, self.task)
-            loader_expert = DataLoader(dataset_expert, batch_size)
+            loader_expert = DataLoader(dataset_expert, batch_size, shuffle = True)
             data.append(loader_expert)
         return data
             
@@ -350,17 +350,17 @@ class MoE():
 
         # train gate
         train_dataset_gate = CustomDataset(train_data, train_target,  self.task)
-        train_loader_gate = DataLoader(train_dataset_gate, batch_size)
+        train_loader_gate = DataLoader(train_dataset_gate, batch_size, shuffle = True)
         # train expert
         train_dataset_expert = CustomDataset(train_data, train_target, self.task)
-        train_loader_expert = DataLoader(train_dataset_expert, batch_size)
+        train_loader_expert = DataLoader(train_dataset_expert, batch_size, shuffle = True)
         if valid_data is not None:
             # valid gate
             valid_dataset_gate = CustomDataset(valid_data.mode(), valid_target,task = self.task)
-            valid_loader_gate = DataLoader(valid_dataset_gate, batch_size)
+            valid_loader_gate = DataLoader(valid_dataset_gate, batch_size, shuffle = True)
             # valid expert
             valid_dataset_expert = CustomDataset(valid_data.mode(), valid_target, task = self.task)
-            valid_loader_expert = DataLoader(valid_dataset_expert, batch_size)
+            valid_loader_expert = DataLoader(valid_dataset_expert, batch_size, shuffle = True)
             return train_loader_expert, train_loader_gate, valid_loader_expert, valid_loader_gate
         else:
             return train_loader_expert, train_loader_gate, None, None
@@ -565,11 +565,12 @@ class Custom_nn(nn.Module):
                  
                 optimizer.zero_grad()
                 y_pred = self(X_batch)
-                # print(f"y_pred {y_pred}, y_pred.shape {y_pred.shape},\n y_batch {y_batch}, y_batch.shape {y_batch.shape}")
-                if self.task in (1,3): # 1-D
-                    loss = torch.mean(loss_fn(y_pred, y_batch.unsqueeze(1)))
+                if self.task == 3: # 1-D
+                    loss = loss_fn(y_pred, y_batch.view(-1, 1))
+                elif self.task == 1:
+                    loss = loss_fn(y_pred, y_batch.unsqueeze(1))
                 else: # n-D
-                    loss = torch.mean(loss_fn(y_pred, y_batch))
+                    loss = loss_fn(y_pred, y_batch)
                 loss_print = loss.clone()
                 # Elastic Net regularization (L1 + L2)
                 l1_regularization = torch.tensor(0., dtype=torch.float64)
