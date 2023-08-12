@@ -336,7 +336,7 @@ class MoE():
             y_exp = y[indices]
             
             dataset_expert = CustomDataset(X_exp, y_exp, self.task)
-            loader_expert = DataLoader(dataset_expert, batch_size, shuffle = True)
+            loader_expert = DataLoader(dataset_expert, batch_size)
             data.append(loader_expert)
         return data
             
@@ -350,17 +350,17 @@ class MoE():
 
         # train gate
         train_dataset_gate = CustomDataset(train_data, train_target,  self.task)
-        train_loader_gate = DataLoader(train_dataset_gate, batch_size, shuffle = True)
+        train_loader_gate = DataLoader(train_dataset_gate, batch_size)
         # train expert
         train_dataset_expert = CustomDataset(train_data, train_target, self.task)
-        train_loader_expert = DataLoader(train_dataset_expert, batch_size, shuffle = True)
+        train_loader_expert = DataLoader(train_dataset_expert, batch_size)
         if valid_data is not None:
             # valid gate
             valid_dataset_gate = CustomDataset(valid_data.mode(), valid_target,task = self.task)
-            valid_loader_gate = DataLoader(valid_dataset_gate, batch_size, shuffle = True)
+            valid_loader_gate = DataLoader(valid_dataset_gate, batch_size)
             # valid expert
             valid_dataset_expert = CustomDataset(valid_data.mode(), valid_target, task = self.task)
-            valid_loader_expert = DataLoader(valid_dataset_expert, batch_size, shuffle = True)
+            valid_loader_expert = DataLoader(valid_dataset_expert, batch_size)
             return train_loader_expert, train_loader_gate, valid_loader_expert, valid_loader_gate
         else:
             return train_loader_expert, train_loader_gate, None, None

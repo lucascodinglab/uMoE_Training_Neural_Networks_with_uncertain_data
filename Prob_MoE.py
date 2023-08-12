@@ -385,7 +385,7 @@ class MoE():
                 weights_exp = prob_dist[indices]
                 weights = np.max(weights_exp, axis=1).tolist()
             dataset_expert = CustomDataset(X_exp, y_exp, weights, self.task)
-            loader_expert = DataLoader(dataset_expert, batch_size, shuffle=True)
+            loader_expert = DataLoader(dataset_expert, batch_size)
             data.append(loader_expert)
         return data
             
@@ -403,18 +403,18 @@ class MoE():
         # train gate
         train_data_and_dist = np.concatenate((train_data, prob_train), axis=1)
         train_dataset_gate = CustomDataset(train_data_and_dist, train_target, weights, self.task)
-        train_loader_gate = DataLoader(train_dataset_gate, batch_size, shuffle=True)
+        train_loader_gate = DataLoader(train_dataset_gate, batch_size)
         # train expert
         train_dataset_expert = CustomDataset(train_data, train_target, weights, self.task)
-        train_loader_expert = DataLoader(train_dataset_expert, batch_size, shuffle=True)
+        train_loader_expert = DataLoader(train_dataset_expert, batch_size)
         if valid_data is not None:
             # valid gate
             valid_data_and_dist = np.concatenate((valid_data.mode(), prob_valid), axis=1)
             valid_dataset_gate = CustomDataset(valid_data_and_dist, valid_target, weights = None, task = self.task)
-            valid_loader_gate = DataLoader(valid_dataset_gate, batch_size, shuffle=True)
+            valid_loader_gate = DataLoader(valid_dataset_gate, batch_size)
             # valid expert
             valid_dataset_expert = CustomDataset(valid_data.mode(), valid_target, weights = None, task = self.task)
-            valid_loader_expert = DataLoader(valid_dataset_expert, batch_size, shuffle=True)
+            valid_loader_expert = DataLoader(valid_dataset_expert, batch_size)
             return train_loader_expert, train_loader_gate, valid_loader_expert, valid_loader_gate
         else:
             return train_loader_expert, train_loader_gate, None, None
