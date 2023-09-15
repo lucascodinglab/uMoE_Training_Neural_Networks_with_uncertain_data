@@ -7,20 +7,16 @@ Welcome to the Uncertainty-aware Mixture of Experts (uMoE) GitHub repository. Th
 The uMoE model is a powerful framework for dealing with uncertain data instances in various applications, including but not limited to financial modeling, medical diagnosis, and natural language processing tasks. It leverages a mixture of experts approach, neural networks, and probability density functions to make informed predictions while considering the inherent uncertainty in the data.
 
 
-<div style="text-align:center">
-  <img src="Images/LocalMode.png" alt="uMoE Model" width="200">
-  <p style="font-style:italic;">Cluster based Local Mode of PDF</p>
-</div>
 
 <div style="display: flex; justify-content: center; align-items: center;">
   <div style="text-align:center; margin-right: 20px;">
-    <img src="Images/LocalMode.pn" alt="uMoE Model" width="200">
+    <img src="Images/uMoE_Architecture.png" alt="uMoE Model" width="200">
     <p style="font-style:italic;">Cluster based Local Mode of PDF</p>
   </div>
   
   <div style="text-align:center;">
-    <img src="Images/LocalMode.pn" alt="Documentation" width="200">
-    <p style="font-style:italic;">Caption for the Documentation</p>
+    <img src="Images/uMoE_Architecture.png" alt="Documentation" width="200">
+    <p style="font-style:italic;">uMoE - Overview</p>
   </div>
 </div>
 
