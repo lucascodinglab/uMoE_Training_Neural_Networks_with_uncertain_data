@@ -12,6 +12,35 @@ The uMoE model is a powerful framework for dealing with uncertain data instances
   <p style="font-style:italic;">Cluster based Local Mode of PDF</p>
 </div>
 
+<div style="display: flex; justify-content: center; align-items: center;">
+  <div style="text-align:center; margin-right: 20px;">
+    <img src="Images/LocalMode.pn" alt="uMoE Model" width="200">
+    <p style="font-style:italic;">Cluster based Local Mode of PDF</p>
+  </div>
+  
+  <div style="text-align:center;">
+    <img src="Images/LocalMode.pn" alt="Documentation" width="200">
+    <p style="font-style:italic;">Caption for the Documentation</p>
+  </div>
+</div>
+
+## Documentation
+
+For detailed information on the uMoE model and its usage, please refer to the documentation in the `docs` directory. It includes tutorials, user guides, and explanations of key concepts.
+In this code:
+
+We use a parent <div> with display: flex; justify-content: center; align-items: center; to center-align the child elements horizontally and vertically.
+Inside the parent <div>, we have two child <div> elements for each image and its caption.
+Each child <div> is centered individually using text-align:center; and spaced apart with margin-right to create a gap between them.
+You can adjust the width of the images and other CSS styles to fit your layout.
+This code will center-align the images side by side with their respective captions. You can add more child <div> elements for additional images and captions as needed.
+
+
+
+
+
+
+
 
 ## Repository Contents
 
