@@ -88,7 +88,7 @@ if __name__ == "__main__":
     
             ########################### Prob. MoE #############################################################
             # MoE
-            umoe = pm.MoE(n, inputsize = input_size, outputsize = output_size, hidden_experts = [32, 32], hidden_gate = [32, 32])
+            umoe = pm.MoE(n, inputsize = input_size, outputsize = output_size, hidden_experts = [16, 16], hidden_gate = [16, 16])
             # val
             umoe.fit(X_train, target_train, X_val, target_val, threshold_samples=threshold_samples, local_mode = local_mode, weighted_experts=True, 
                     verbose=True, batch_size_experts=batch_size_experts, batch_size_gate=batch_size_gate, n_epochs=n_epochs, 
@@ -103,7 +103,7 @@ if __name__ == "__main__":
             
             
             # Ref MoE
-            ref_moe = rm.MoE(n, inputsize = input_size, outputsize = output_size, hidden_experts = [32, 32], hidden_gate = [32, 32])
+            ref_moe = rm.MoE(n, inputsize = input_size, outputsize = output_size, hidden_experts = [16, 16], hidden_gate = [16, 16])
             # val
             ref_moe.fit(ref_train_mode, target_train, X_val, target_val,
                         verbose=True, batch_size_experts=batch_size_experts, batch_size_gate=batch_size_gate, 
@@ -117,7 +117,7 @@ if __name__ == "__main__":
    
             ############################ Referenz MoE EV #############################################################
             # Ref MoE
-            ref_moe = rm.MoE(n, inputsize = input_size, outputsize = output_size, hidden_experts = [32, 32], hidden_gate = [32, 32])
+            ref_moe = rm.MoE(n, inputsize = input_size, outputsize = output_size, hidden_experts = [16, 16], hidden_gate = [16, 16])
             # val
             ref_moe.fit(ref_train_ev, target_train, X_val, target_val,
                         verbose=True, batch_size_experts=batch_size_experts, batch_size_gate=batch_size_gate, 
@@ -132,7 +132,7 @@ if __name__ == "__main__":
             ############################ Referenz NN Mode #############################################################
             if n == 2:
                # NN
-                nn = rm.MoE(1, inputsize = input_size, outputsize = output_size, hidden_experts = [32, 32],  hidden_gate=[1])
+                nn = rm.MoE(1, inputsize = input_size, outputsize = output_size, hidden_experts = [16, 16],  hidden_gate=[1])
                 # val
                 nn.fit(ref_train_mode, target_train, X_val, target_val,
                             verbose=True, batch_size_experts=batch_size_experts, batch_size_gate=batch_size_gate, 
@@ -147,7 +147,7 @@ if __name__ == "__main__":
             ############################ Referenz NN Mode #############################################################
             if n == 2:
                # NN
-                nn = rm.MoE(1, inputsize = input_size, outputsize = output_size, hidden_experts = [32, 32],  hidden_gate=[1])
+                nn = rm.MoE(1, inputsize = input_size, outputsize = output_size, hidden_experts = [16, 16],  hidden_gate=[1])
                 # val
                 nn.fit(ref_train_ev, target_train, X_val, target_val,
                             verbose=True, batch_size_experts=batch_size_experts, batch_size_gate=batch_size_gate, 
