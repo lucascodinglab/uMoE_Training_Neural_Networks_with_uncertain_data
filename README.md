@@ -9,7 +9,7 @@ The uMoE model is a powerful framework for dealing with uncertain data instances
 
 
 <div style="display: flex; justify-content: center; align-items: center;">
-  <div style="text-align:center; margin-right: 20px;">
+  <div style="text-align:center">
     <img src="Images/LocalMode.png" alt="uMoE Model" width="200">
     <p style="font-style:italic;">Cluster based Local Mode of PDF</p>
   </div>
