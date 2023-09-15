@@ -162,9 +162,9 @@ def preprocess_data(data_path = None, dataset = None):
 
 
 
-def compare_scores(cluster_accuracies_local_list, cluster_accuracies_global_list, cluster_accuracies_ref_list, 
-                   score_moe_list, score_moe_list_glob, score_ref_moe_list, score_ref_nn_list, expert_range, 
-                   save_path, dataset, missing, score_type, bandwidth, threshold_samples):
+def compare_scores( 
+                   score_umoe_list, score_ref_moe_mode_list, score_ref_moe_ev_list, score_ref_nn_mode_list,
+                   score_ref_nn_ev_list, expert_range, save_path, dataset, missing, score_type, bandwidth, threshold_samples):
     """
     Compare the scores of MoE and reference models and create two separate plots.
 
@@ -179,23 +179,27 @@ def compare_scores(cluster_accuracies_local_list, cluster_accuracies_global_list
 
     # Plot for Scores
     plt.figure(figsize=(10, 6))
-    plt.plot(expert_range, score_moe_list, marker='o', label='MoE Local', color="blue")
-    plt.plot(expert_range, score_moe_list_glob, marker='o', label='MoE Global', color="darkblue")
-    plt.plot(expert_range, score_ref_moe_list, marker='o', label='Reference MoE', color="red")
-    plt.plot(expert_range, [score_ref_nn_list] * len(expert_range), linestyle='--', marker='o', label='Reference NN', color="black")
-    # Annotate score values above each x point
-    # Annotate score values above each x point
-    for i, txt in enumerate(score_moe_list):
-        plt.annotate(f'{txt:.2f}', (expert_range[i], score_moe_list[i]), textcoords="offset points", xytext=(0,10), ha='center', fontsize=8, color='blue')
-    for i, txt in enumerate(score_moe_list_glob):
-        plt.annotate(f'{txt:.2f}', (expert_range[i], score_moe_list_glob[i]), textcoords="offset points", xytext=(0,10), ha='center', fontsize=8, color='blue')
-    for i, txt in enumerate(score_ref_moe_list):
-        plt.annotate(f'{txt:.2f}', (expert_range[i], score_ref_moe_list[i]), textcoords="offset points", xytext=(0,10), ha='center', fontsize=8, color='blue')
+    plt.plot(expert_range, score_umoe_list, marker='o', label='uMoE', color="blue")
+    plt.plot(expert_range, score_ref_moe_mode_list, marker='o', label='Ref. MoE (Mode)', color="red")
+    plt.plot(expert_range, score_ref_moe_ev_list, marker='o', label='Ref. MoE (EV)', color="#FF6666")
+    plt.plot(expert_range, [score_ref_nn_mode_list] * len(expert_range), linestyle='--', marker='o', label='Ref. NN (Mode)', color="black")
+    plt.plot(expert_range, [score_ref_nn_ev_list] * len(expert_range), linestyle='--', marker='o', label='Ref. NN (EV)', color="gray")
 
+    for i, txt in enumerate(score_umoe_list):
+        plt.annotate(f'{txt:.2f}', (expert_range[i], score_umoe_list[i]), textcoords="offset points", xytext=(0,10), ha='center', fontsize=8, color='blue')
     
+    # Annotate score values above each x point for Ref. MoE (Mode) scores
+    for i, txt in enumerate(score_ref_moe_mode_list):
+        plt.annotate(f'{txt:.2f}', (expert_range[i], score_ref_moe_mode_list[i]), textcoords="offset points", xytext=(0,10), ha='center', fontsize=8, color='red')
+    
+    # Annotate score values above each x point for Ref. MoE (EV) scores
+    for i, txt in enumerate(score_ref_moe_ev_list):
+        plt.annotate(f'{txt:.2f}', (expert_range[i], score_ref_moe_ev_list[i]), textcoords="offset points", xytext=(0,10), ha='center', fontsize=8, color='red')
+    
+
     plt.xlabel('Number of Experts')
     plt.ylabel('{}'.format(score_type))
-    plt.title('Comparison of MoE and References {} for {}, Missing: {}, Threshold: {}'.format(score_type, dataset.upper(), missing, threshold_samples))
+    plt.title('uMoE and References {} for {} (Uncertainty = {}, p = {})'.format(score_type, dataset.upper(), missing, threshold_samples))
     plt.xticks(expert_range)
     plt.legend()
     plt.grid(True)
@@ -206,42 +210,7 @@ def compare_scores(cluster_accuracies_local_list, cluster_accuracies_global_list
     plt.show()
     plt.close()
 
-    # Plot for Cluster Accuracies
-    plt.figure(figsize=(10, 6))
-    plt.plot(expert_range, cluster_accuracies_local_list, marker='X', label='Local Cluster', color="blue", linestyle="dashed")
-    plt.plot(expert_range, cluster_accuracies_global_list, marker='X', label='Global Cluster', color="darkblue", linestyle="dashed")
-    plt.plot(expert_range, cluster_accuracies_ref_list, marker='X', label='Ref Cluster', color="red", linestyle="dashed")
-    
-    # Mark highest score with a larger yellow star
-    max_score_idx_local = np.argmax(score_moe_list)
-    max_score_idx_glob = np.argmax(score_moe_list_glob)
-    max_score_idx_ref = np.argmax(score_ref_moe_list)
-    star_size = 400  # Adjust the size of the star marker
-    
-    plt.scatter(expert_range[max_score_idx_local], cluster_accuracies_local_list[max_score_idx_local], marker='*', color='orange', s=star_size, label='Max Score MoE Local')
-    plt.scatter(expert_range[max_score_idx_glob], cluster_accuracies_global_list[max_score_idx_glob], marker='*', color='orange', s=star_size, label='Max Score MoE Global')
-    plt.scatter(expert_range[max_score_idx_ref], cluster_accuracies_ref_list[max_score_idx_ref], marker='*', color='orange', s=star_size, label='Max Score Ref MoE')
-    
-    # Annotate score values above each x point
-    for i, txt in enumerate(score_moe_list):
-        plt.annotate(f'{txt:.2f}', (expert_range[i], cluster_accuracies_local_list[i]), textcoords="offset points", xytext=(0,10), ha='center', fontsize=8, color='blue')
-    for i, txt in enumerate(score_moe_list_glob):
-        plt.annotate(f'{txt:.2f}', (expert_range[i], cluster_accuracies_global_list[i]), textcoords="offset points", xytext=(0,10), ha='center', fontsize=8, color='blue')
-    for i, txt in enumerate(score_ref_moe_list):
-        plt.annotate(f'{txt:.2f}', (expert_range[i], cluster_accuracies_ref_list[i]), textcoords="offset points", xytext=(0,10), ha='center', fontsize=8, color='blue')
-
-    plt.xlabel('Number of Experts')
-    plt.ylabel('Cluster Accuracies')
-    plt.title('Comparison of Cluster Accuracies for {}, Missing: {}, Threshold: {}'.format(dataset.upper(), missing, threshold_samples))
-    plt.xticks(expert_range)
-    plt.legend()
-    plt.grid(True)
-    
-    # Create the full file path using os.path.join
-    cluster_acc_filename = os.path.join(save_path, "Cluster Accuracies of {} Missing {} Bandwidth {} Threshold {}.png".format(dataset.replace(":", "_").upper(), missing, bandwidth, threshold_samples))
-    plt.savefig(cluster_acc_filename)
-    plt.show()
-    plt.close()
+   
     
 def delete_randomly_data(data, delete_percent, random_state=None):
     num_values_to_delete = int(data.size * delete_percent)
@@ -335,5 +304,30 @@ def plot_loss_vs_experts_fold(fold_num, file_path, local_moe_loss, global_moe_lo
 
 if __name__ == "__main__":
 
+    # Generate sample expert range values
+    expert_range = np.arange(2, 7)  # Example: Number of experts from 2 to 10
+    
+    # Generate sample scores for uMoE and reference models
+    score_umoe_list = np.random.rand(len(expert_range)) * 100  # Example: Random uMoE scores between 0 and 100
+    score_ref_moe_mode_list = np.random.rand(len(expert_range)) * 100  # Example: Random Ref. MoE (Mode) scores
+    score_ref_moe_ev_list = np.random.rand(len(expert_range)) * 100  # Example: Random Ref. MoE (EV) scores
+    score_ref_nn_mode_list = [80]
+    score_ref_nn_ev_list = [65]
+    
+    # Define other parameters
+    save_path = "./"
+    dataset = "Sample Dataset"
+    missing = "0.5"
+    score_type = "Accuracy"
+    bandwidth = 0.1
+    threshold_samples = 100
+    
+    # Call the compare_scores function with the generated data
+    compare_scores(score_umoe_list, score_ref_moe_mode_list, score_ref_moe_ev_list, score_ref_nn_mode_list, score_ref_nn_ev_list, expert_range, save_path, dataset, missing, score_type, bandwidth, threshold_samples)
+    
+        
+        
+    
+    
     
     pass

@@ -54,7 +54,7 @@ class MoE():
     to leverage the power of the Mixture of Experts model for accurate predictions and meaningful uncertainty
     estimates.
     """
-    def __init__(self, n_experts, hidden_experts = [32,32], hidden_gate = [32,32], dropout = 0, inputsize = 1, outputsize = 1, probs_to_gate = True) : 
+    def __init__(self, n_experts, hidden_experts = [16,16], hidden_gate = [16,16], dropout = 0, inputsize = 1, outputsize = 1, probs_to_gate = True) : 
     
         self.n_experts = n_experts 
         self.hidden_experts = hidden_experts
@@ -114,9 +114,9 @@ class MoE():
     
     
     def fit(self, train_data, train_target, valid_data = None, 
-            valid_target = None, reg_alpha = 0.5, reg_lambda = 0.0003, 
-            lr = 0.001, n_epochs = 100, batch_size_experts = 4, 
-            batch_size_gate = 8, local_mode = True, n_samples = 100, 
+            valid_target = None, reg_alpha = 0.5, reg_lambda = 0.002, 
+            lr = 0.01, n_epochs = 100, batch_size_experts = 16, 
+            batch_size_gate = 32, local_mode = True, n_samples = 100, 
             threshold_samples = .5, weighted_experts = True, 
             weighted_gate = False, verbose = False, seed = None): 
         """
@@ -240,15 +240,10 @@ class MoE():
                                         n_epochs = n_epochs, loss_fn = loss_fn, weighted_loss = weighted_experts, lr = lr, 
                                         reg_alpha = reg_alpha, reg_lambda = reg_lambda, verbose = self.verbose)   
         
-        for expert in self.experts:
-            for param in expert.parameters():
-                param.requires_grad = False
-        # Train Gate
-        
+
         # Load Global Mode Train und Validation Set for Training of Gate
         train_loader_expert, train_loader_gate, valid_loader_expert, valid_loader_gate = self.__datasets_for_gate(train_data.mode(), train_target, self.prob_dist_train, valid_data, valid_target,
                                                                                                                   prob_dist_valid, batch_size = self.batch_size_gate, weighted_gate = weighted_gate)
-        
 
         self.history_val_weighted, self.bestScore = self.gate.train_model(train_loader_expert, train_loader_gate, valid_loader_expert, valid_loader_gate, n_epochs, loss_fn, weighted_gate, lr, reg_alpha, reg_lambda, verbose, self.task)
 
@@ -330,7 +325,7 @@ class MoE():
                 with warnings.catch_warnings():
                     # deactivate warning about optimizer np.inf error
                     warnings.filterwarnings("ignore", category=RuntimeWarning)
-                    optimize_modal = basinhopping(lambda x: objective_function(x = x, cluster = cluster, kde = data.data[i], instance = instance, missing_dims = missing_dims, centroids = self.kmeans.cluster_centers_), x0=cluster_centers, minimizer_kwargs=minimizer_kwargs, niter=20, stepsize=0.3)                                    
+                    optimize_modal = basinhopping(lambda x: objective_function(x = x, cluster = cluster, kde = data.data[i], instance = instance, missing_dims = missing_dims, centroids = self.kmeans.cluster_centers_), x0=cluster_centers, minimizer_kwargs=minimizer_kwargs, niter=15, stepsize=0.2)                                    
                     modal_values = optimize_modal.x.tolist()
                     # print(instance)
                     for dim, modal_value in zip(missing_dims, modal_values):
@@ -445,62 +440,7 @@ class MoE():
         
         return score
     
-    def analyze(self, data_certain):
-        """
-        Analyze the clustering results and generate plots.
-    
-        Parameters
-        ----------
-        data_certain : np.array
-            Data used for certain prediction.
-        save_path : str
-            Location where the analysis plots will be saved (including the folder path).
-    
-        Returns
-        -------
-    
-        """
-        
-        labels_certain = self.pred_clusters(data_certain)
-            
-        dominant_clusters_local, dominant_clusters_global, cluster_accuracies_local, cluster_accuracies_global, silhouette_local = self.__analyze_clustering(labels_certain)
 
-        return cluster_accuracies_local, cluster_accuracies_global, self.bestScore
-    
-    def __analyze_clustering(self, dominant_clusters_certain):
-        num_clusters = self.n_experts  # Number of clusters
-        cluster_accuracies_global = np.zeros(num_clusters)
-
-        # global clustering
-        dominant_clusters_global = self.pred_clusters(self.train_data.mode())
-
-        if self.local_mode:
-            dominant_clusters_local = self.pred_clusters(self.train_data_local)
-            cluster_accuracies_local = np.zeros(num_clusters)
-        
-        for cluster in range(num_clusters):
-            cluster_indices = np.where(dominant_clusters_certain == cluster)[0]
-            correct_predictions_global = np.sum(dominant_clusters_global[cluster_indices] == cluster)
-            cluster_accuracy_global = correct_predictions_global / len(cluster_indices)
-            cluster_accuracies_global[cluster] = cluster_accuracy_global
-            
-            if self.local_mode:
-               correct_predictions_local = np.sum(dominant_clusters_local[cluster_indices] == cluster)
-               cluster_accuracy_local = correct_predictions_local / len(cluster_indices)
-               cluster_accuracies_local[cluster] = cluster_accuracy_local
-    
-        # Calculate the weighted average of cluster accuracies for global and local modes
-        weighted_average_global = accuracy_score(dominant_clusters_certain, dominant_clusters_global)
-        if self.local_mode:
-            weighted_average_local = accuracy_score(dominant_clusters_certain, dominant_clusters_local)
-    
-     
-        # silouetten coefficiant
-        if self.local_mode:
-            silhouette_local = silhouette_score(self.train_data_local, dominant_clusters_local)
-            return dominant_clusters_local, dominant_clusters_global, weighted_average_local, weighted_average_global, silhouette_local 
-        else:
-            return None, dominant_clusters_global, None, weighted_average_global, None
                 
 
 class CustomDataset(Dataset):
@@ -553,7 +493,7 @@ class Custom_nn(nn.Module):
    
 
     """
-    def __init__(self, inputs, outputs, hidden=[32,32], activation=nn.ReLU(), dropout=0.0, task = None ):
+    def __init__(self, inputs, outputs, hidden=[16,16], activation=nn.ReLU(), dropout=0.0, task = None ):
         r"""
 
         Parameters
@@ -682,7 +622,7 @@ class Gate_nn(nn.Module):
     """
     Subclass of Custom_nn used for training of the Gate Unit
     """
-    def __init__(self, inputs, outputs, hidden=[32, 32], activation=nn.ReLU(), dropout=0, trained_experts_list=None):
+    def __init__(self, inputs, outputs, hidden=[16, 16], activation=nn.ReLU(), dropout=0, trained_experts_list=None):
         super(Gate_nn, self).__init__()
 
         self.trained_experts_list = nn.ModuleList(trained_experts_list)
