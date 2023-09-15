@@ -5,7 +5,7 @@ Welcome to the Uncertainty-aware Mixture of Experts (uMoE) GitHub repository. Th
 ## Overview
 
 The uMoE model is a powerful framework for dealing with uncertain data instances in various applications, including but not limited to financial modeling, medical diagnosis, and natural language processing tasks. It leverages a mixture of experts approach, neural networks, and probability density functions to make informed predictions while considering the inherent uncertainty in the data.
-![Image Description](relative_path_to_image)
+![Image Description](Images/LocalMode.png)
 
 ## Repository Contents
 
