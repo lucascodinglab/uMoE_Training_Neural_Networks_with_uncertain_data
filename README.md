@@ -15,7 +15,7 @@ The uMoE model is a powerful framework for dealing with uncertain data instances
   </div>
   
   <div style="text-align:center;">
-    <img src="Images/uMoE_Architecture.png" alt="Documentation" width="200">
+    <img src="Images/uMoE_Architecture.png" alt="Documentation" width="400">
     <p style="font-style:italic;">uMoE - Overview</p>
   </div>
 </div>
