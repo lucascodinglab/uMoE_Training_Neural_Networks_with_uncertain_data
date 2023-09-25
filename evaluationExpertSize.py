@@ -33,10 +33,6 @@ if __name__ == "__main__":
     # Load data
     data, target, input_size, output_size, score_type = ut.preprocess_data(data_path = data_path, dataset=dataset)
 
-    # random_indices = np.random.choice(data.shape[0], 4000, replace=False)
-    # data = data[random_indices]
-    # target = target[random_indices]
-
     # Scale data
     data_sc = MinMaxScaler().fit_transform(data)
     target = target
