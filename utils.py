@@ -141,15 +141,32 @@ def preprocess_data(data_path = None, dataset = None):
         input_size = X.shape[1]
         output_size = 1
         score_type = "MSE"
-    
-    elif dataset == "artificial":
-        data = pd.read_csv(data_path + "\\" + dataset + ".csv")        
-        # Delete Data (over all Attributes)
-        X = data.drop(columns='target')
+        
+    elif dataset == "yeast":
+        data_file = data_path + "\\" + "yeast" + "\\"+ "yeast.data"
+        names_file = data_path + "\\" + "yeast" + "\\"+"yeast.names"
+        with open(names_file, "r") as file:
+            for i, line in enumerate(file.readlines()):
+                if i >= 10: 
+                    break
+        df = pd.read_csv(data_file, header=None,delim_whitespace=True)
+        df.drop(columns=0)
+        str_cols = df.select_dtypes(include=['object']).columns
+        df[str_cols] = df[str_cols].apply(lambda x: pd.Categorical(x).codes)
+        X = df.drop(columns=9)
         X = X.values
-        y = np.array(data["target"])
+        y = np.array(df[9])
         input_size = X.shape[1]
-        output_size = 3
+        output_size = 10
+        score_type = "Accuracy"
+    
+    elif dataset == "telescope":
+        data = pd.read_csv(data_path + "\\" + dataset + ".csv")
+        data.dropna(inplace=True)
+        X = data.drop(columns='class').values
+        y = np.array(data["class"])
+        input_size = X.shape[1]
+        output_size = 2 
         score_type = "Accuracy"
         
     if output_size > 1:
@@ -303,29 +320,27 @@ def plot_loss_vs_experts_fold(fold_num, file_path, local_moe_loss, global_moe_lo
 
 
 if __name__ == "__main__":
+    
+    data_file = r"D:\Github_Projects\Datasets\magic+gamma+telescope\magic04.data"
+    names_file = r"D:\Github_Projects\Datasets\magic+gamma+telescope\magic04.names"
+    
+    # Lese die Spaltenbeschriftungen aus der yeast.names-Datei
+    with open(names_file, "r") as file:
+        for i, line in enumerate(file.readlines()):
+            print(f"Zeile {i}: {line.strip()}")
+            if i >= 10:  # Nur die ersten 8 Zeilen anzeigen (oder anpassen, je nach Bedarf)
+                break
 
-    # Generate sample expert range values
-    expert_range = np.arange(2, 7)  # Example: Number of experts from 2 to 10
     
-    # Generate sample scores for uMoE and reference models
-    score_umoe_list = np.random.rand(len(expert_range)) * 100  # Example: Random uMoE scores between 0 and 100
-    score_ref_moe_mode_list = np.random.rand(len(expert_range)) * 100  # Example: Random Ref. MoE (Mode) scores
-    score_ref_moe_ev_list = np.random.rand(len(expert_range)) * 100  # Example: Random Ref. MoE (EV) scores
-    score_ref_nn_mode_list = [80]
-    score_ref_nn_ev_list = [65]
+    # Lese die Daten aus der yeast.data-Datei und verwende die Spaltenbeschriftungen
+    df = pd.read_csv(data_file, header=None,delim_whitespace=True)
     
-    # Define other parameters
-    save_path = "./"
-    dataset = "Sample Dataset"
-    missing = "0.5"
-    score_type = "Accuracy"
-    bandwidth = 0.1
-    threshold_samples = 100
+    str_cols = df.select_dtypes(include=['object']).columns
+    df[str_cols] = df[str_cols].apply(lambda x: pd.Categorical(x).codes)
+
     
-    # Call the compare_scores function with the generated data
-    compare_scores(score_umoe_list, score_ref_moe_mode_list, score_ref_moe_ev_list, score_ref_nn_mode_list, score_ref_nn_ev_list, expert_range, save_path, dataset, missing, score_type, bandwidth, threshold_samples)
-    
-        
+
+
         
     
     
