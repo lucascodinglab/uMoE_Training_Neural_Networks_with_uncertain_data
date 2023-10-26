@@ -1,21 +1,10 @@
-import uframe as uf
 import numpy as np
 from sklearn.cluster import KMeans
 import torch.nn as nn
 import torch
-import torch.optim as optim
-import torch.nn.functional as F
-from sklearn.metrics import mean_squared_error, accuracy_score, silhouette_score
-from tqdm import tqdm
-from scipy.optimize import basinhopping
-from scipy.spatial.distance import cdist
+from sklearn.metrics import mean_squared_error, accuracy_score
 from torch.utils.data import DataLoader, Dataset
 import copy
-import warnings
-import matplotlib.pyplot as plt
-from matplotlib.backends.backend_pdf import PdfPages
-import plotly.graph_objects as go
-import plotly.offline as pyo
 import os
 
 
@@ -209,7 +198,6 @@ class MoE():
         for expert in self.experts:
             for param in expert.parameters():
                 param.requires_grad = False
-        
         # Load Global Mode Train und Validation Set for Training of Gate
         train_loader_expert, train_loader_gate, valid_loader_expert, valid_loader_gate = self.__datasets_for_gate(train_data.mode(), train_target, valid_data, valid_target, batch_size = self.batch_size_gate)
         
@@ -350,48 +338,10 @@ class MoE():
         
         return score
     
-    def analyze(self, data_certain):
-        """
-        Analyze the clustering results and generate plots.
     
-        Parameters
-        ----------
-        data_certain : np.array
-            Data used for certain prediction.
-        save_path : str
-            Location where the analysis plots will be saved (including the folder path).
-    
-        Returns
-        -------
-    
-        """
-        
-        labels_certain = self.pred_clusters(data_certain)
-            
-        cluster_accuracies_global, silhouette = self.__analyze_clustering(labels_certain)
-        return cluster_accuracies_global, self.bestScore
-    def __analyze_clustering(self, dominant_clusters_certain):
-        num_clusters = self.n_experts  # Number of clusters
-        cluster_accuracies_global = np.zeros(num_clusters)
-
-        # global clustering
-        dominant_clusters_global = self.pred_clusters(self.train_data.mode())
-
-        
-        for cluster in range(num_clusters):
-            cluster_indices = np.where(dominant_clusters_certain == cluster)[0]
-            correct_predictions_global = np.sum(dominant_clusters_global[cluster_indices] == cluster)
-            cluster_accuracy_global = correct_predictions_global / len(cluster_indices)
-            cluster_accuracies_global[cluster] = cluster_accuracy_global
-            
-    
-        # Calculate the weighted average of cluster accuracies for global and local modes
-        weighted_average_global = accuracy_score(dominant_clusters_certain, dominant_clusters_global)
-
-        #silhouette score
-        silhouette = silhouette_score(self.train_data.mode(), dominant_clusters_global)
-        return weighted_average_global, silhouette
-                
+    def get_val_loss(self):
+        return self.bestScore
+  
         
 class CustomDataset(Dataset):
     """
@@ -436,7 +386,7 @@ class Custom_nn(nn.Module):
    
 
     """
-    def __init__(self, inputs, outputs, hidden=[16,16], activation=nn.ReLU(), dropout=0.3, task = None ):
+    def __init__(self, inputs, outputs, hidden=[16,16], activation=nn.ReLU(), dropout=0.0, task = None ):
         r"""
 
         Parameters
@@ -661,8 +611,7 @@ class Gate_nn(nn.Module):
             self.load_state_dict(best_weights)
         return history, best_score
 
-
-    
+ 
  
 def init_normal(module):
     if type(module) == nn.Linear:

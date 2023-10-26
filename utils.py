@@ -3,7 +3,6 @@ import pandas as pd
 from sklearn.datasets import fetch_california_housing
 from sklearn.preprocessing import LabelEncoder, OneHotEncoder
 import matplotlib.pyplot as plt
-import csv
 import os
 
 
@@ -53,16 +52,6 @@ def preprocess_data(data_path = None, dataset = None):
         input_size = X.shape[1]
         output_size = 1
         score_type = "Accuracy"
-    elif dataset == "breast_cancer":
-        data = pd.read_csv(data_path + "\\" + dataset + ".csv") 
-        data.drop(columns=["id"],axis=1,inplace=True)
-        X = data.drop(columns='diagnosis').values
-        y = data["diagnosis"]
-        y = y.reset_index(drop=True)
-        y = np.array(y.map({'M': 0, 'B': 1}))
-        input_size = X.shape[1]
-        output_size = 1
-        score_type = "Accuracy"
     elif dataset == "california":
         data = fetch_california_housing()
         X = data.data
@@ -101,28 +90,7 @@ def preprocess_data(data_path = None, dataset = None):
         input_size = X.shape[1]
         output_size = 6
         score_type = "Accuracy"
-        label_encoder = LabelEncoder()
-        y_labels = label_encoder.fit_transform(y)
-        onehot_encoder = OneHotEncoder(sparse=False)
-        onehot_encoded = onehot_encoder.fit_transform(y_labels.reshape(-1, 1))
-    elif dataset == "microbes":
-        data = pd.read_csv(data_path + "\\" + dataset + ".csv")
-        data.drop(columns=["Unnamed: 0"],axis=1,inplace =True)
-        str_cols = data.select_dtypes(include=['object']).columns
-        data[str_cols] = data[str_cols].apply(lambda x: pd.Categorical(x).codes)
-        X = data.drop(columns='microorganisms')
-        X = X.values
-        y = np.array(data["microorganisms"])
-        input_size = X.shape[1]
-        output_size = 10
-        score_type = "Accuracy"     
-    elif dataset == "wifi":
-        data = pd.read_csv(data_path + "\\" + dataset + ".txt", delimiter='\t', header=None)
-        X = data.drop(columns=7).values
-        y = np.array(data[7])
-        input_size = X.shape[1]
-        output_size = 4
-        score_type = "Accuracy"
+        label_encoder = LabelEncoder()   
     elif dataset == "banana":
         data = pd.read_csv(data_path + "\\" + dataset + ".csv")
         X = data.drop(columns="Class", axis=1).values
@@ -130,44 +98,7 @@ def preprocess_data(data_path = None, dataset = None):
         input_size = X.shape[1]
         output_size = 1
         score_type = "Accuracy"  
-    elif dataset == "life":
-        data = pd.read_csv(data_path + "\\" + dataset + ".csv")        
-        data.drop(columns=["Year", "Country","Status"],axis=1,inplace=True)
-        data.dropna(inplace=True)
-        # Delete Data (over all Attributes)
-        X = data.drop(columns='Life expectancy ')
-        X = X.values
-        y = np.array(data["Life expectancy "])
-        input_size = X.shape[1]
-        output_size = 1
-        score_type = "MSE"
-        
-    elif dataset == "yeast":
-        data_file = data_path + "\\" + "yeast" + "\\"+ "yeast.data"
-        names_file = data_path + "\\" + "yeast" + "\\"+"yeast.names"
-        with open(names_file, "r") as file:
-            for i, line in enumerate(file.readlines()):
-                if i >= 10: 
-                    break
-        df = pd.read_csv(data_file, header=None,delim_whitespace=True)
-        df.drop(columns=0)
-        str_cols = df.select_dtypes(include=['object']).columns
-        df[str_cols] = df[str_cols].apply(lambda x: pd.Categorical(x).codes)
-        X = df.drop(columns=9)
-        X = X.values
-        y = np.array(df[9])
-        input_size = X.shape[1]
-        output_size = 10
-        score_type = "Accuracy"
-    
-    elif dataset == "telescope":
-        data = pd.read_csv(data_path + "\\" + dataset + ".csv")
-        data.dropna(inplace=True)
-        X = data.drop(columns='class').values
-        y = np.array(data["class"])
-        input_size = X.shape[1]
-        output_size = 2 
-        score_type = "Accuracy"
+
         
     if output_size > 1:
         label_encoder = LabelEncoder()
@@ -243,53 +174,6 @@ def delete_randomly_data(data, delete_percent, random_state=None):
     
     return data_copy.reshape(data.shape)
 
-def storeKeyValuePairs(*args):
-    """
-    Stores key-value pairs in the order they are received.
-
-    Args:
-        *args: Variable number of arguments as key-value pairs.
-
-    Returns:
-        dict: A dictionary containing the stored key-value pairs.
-    """
-    results_dict = {}
-    for i in range(0, len(args), 2):
-        if i + 1 < len(args):
-            key = args[i]
-            value = args[i + 1]
-            results_dict[key] = value
-    return results_dict
-
-
-def saveResults(result_dict, folder, base_filename):
-    """
-    Saves measurement results from a dictionary to a CSV file.
-
-    Args:
-        result_dict (dict): A dictionary containing measurement names as keys and their corresponding results as values.
-        folder (str): The folder path where the CSV file will be saved.
-        base_filename (str): The base name of the CSV file (without the ".csv" extension).
-
-    Returns:
-        None
-    """
-    try:
-        # Create the folder if it doesn't exist
-        if not os.path.exists(folder):
-            os.makedirs(folder)
-        
-        file_path = os.path.join(folder, f'{base_filename}.csv')
-        with open(file_path, 'w', newline='') as csvfile:
-            fieldnames = ['Measurement', 'Result']
-            writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
-            
-            writer.writeheader()
-            for measurement, result in result_dict.items():
-                writer.writerow({'Measurement': measurement, 'Result': result})
-        print(f'Results successfully saved to {file_path}.')
-    except Exception as e:
-        print(f'Error while saving results: {e}')
         
         
 def find_best_expert(expert_counts, average_losses):
@@ -297,52 +181,10 @@ def find_best_expert(expert_counts, average_losses):
     return best_expert_count
 
 
-def plot_loss_vs_experts_fold(fold_num, file_path, local_moe_loss, global_moe_loss, ref_moe_mode_loss, ref_moe_ev_loss):
-    experts = list(range(2, len(local_moe_loss) + 2))
-    
-    plt.plot(experts, local_moe_loss, marker='o', label='Local MoE')
-    plt.plot(experts, global_moe_loss, marker='o', label='Global MoE')
-    plt.plot(experts, ref_moe_mode_loss, marker='o', label='Ref. MoE Mode')
-    plt.plot(experts, ref_moe_ev_loss, marker='o', label='Ref. MoE EV')
-    
-    plt.xlabel('Number of Experts')
-    plt.ylabel('Validation Loss')
-    plt.title(f'Validation Loss vs Number of Experts')
-    plt.legend()
-    plt.xticks(experts)  # Set the x-axis ticks to match the expert values
-
-    
-    # Ensure the directory exists before saving
-    path = os.path.join(file_path, f"Val. Loss for Fold {fold_num}.png")
-    plt.savefig(path)
-    plt.close()
-
 
 
 if __name__ == "__main__":
     
-    data_file = r"D:\Github_Projects\Datasets\magic+gamma+telescope\magic04.data"
-    names_file = r"D:\Github_Projects\Datasets\magic+gamma+telescope\magic04.names"
-    
-    # Lese die Spaltenbeschriftungen aus der yeast.names-Datei
-    with open(names_file, "r") as file:
-        for i, line in enumerate(file.readlines()):
-            print(f"Zeile {i}: {line.strip()}")
-            if i >= 10:  # Nur die ersten 8 Zeilen anzeigen (oder anpassen, je nach Bedarf)
-                break
-
-    
-    # Lese die Daten aus der yeast.data-Datei und verwende die Spaltenbeschriftungen
-    df = pd.read_csv(data_file, header=None,delim_whitespace=True)
-    
-    str_cols = df.select_dtypes(include=['object']).columns
-    df[str_cols] = df[str_cols].apply(lambda x: pd.Categorical(x).codes)
-
-    
 
 
-        
-    
-    
-    
     pass

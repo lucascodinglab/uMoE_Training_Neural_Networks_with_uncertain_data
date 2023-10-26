@@ -2,7 +2,7 @@ import numpy as np
 from sklearn.cluster import KMeans
 import torch.nn as nn
 import torch
-from sklearn.metrics import mean_squared_error, accuracy_score, silhouette_score
+from sklearn.metrics import mean_squared_error, accuracy_score
 from tqdm import tqdm
 from scipy.optimize import basinhopping
 from scipy.spatial.distance import cdist
@@ -230,7 +230,7 @@ class MoE():
         else:
             prob_dist_valid = None
             valid_loader_list_experts = [None] * self.n_experts
-            
+        
         # Train Experts  
             
         for i in range(self.n_experts):
@@ -239,7 +239,7 @@ class MoE():
                                         n_epochs = n_epochs, loss_fn = loss_fn, weighted_loss = weighted_experts, lr = lr, 
                                         reg_alpha = reg_alpha, reg_lambda = reg_lambda, verbose = self.verbose)   
         
-                
+      
         # Load Global Mode Train und Validation Set for Training of Gate
         train_loader_expert, train_loader_gate, valid_loader_expert, valid_loader_gate = self.__datasets_for_gate(train_data.mode(), train_target, self.prob_dist_train, valid_data, valid_target,
                                                                                                                   prob_dist_valid, batch_size = self.batch_size_gate, weighted_gate = weighted_gate)
@@ -292,7 +292,7 @@ class MoE():
         
         data_local_mode = data.mode().copy()
         dominant_cluster = np.argmax(prob_dist, axis=1)
-        for i, instance in tqdm(enumerate(data_local_mode), total=len(data_local_mode), desc="Search Local Cluster Mode"):
+        for i, instance in tqdm(enumerate(data_local_mode), total=len(data_local_mode), desc="Search Local Mode of Subspace"):
             missing_dims = data.data[i].indices[1]
             cluster = dominant_cluster[i]
             if len(missing_dims) > 0:
@@ -324,7 +324,7 @@ class MoE():
                 with warnings.catch_warnings():
                     # deactivate warning about optimizer np.inf error
                     warnings.filterwarnings("ignore", category=RuntimeWarning)
-                    optimize_modal = basinhopping(lambda x: objective_function(x = x, cluster = cluster, kde = data.data[i], instance = instance, missing_dims = missing_dims, centroids = self.kmeans.cluster_centers_), x0=cluster_centers, minimizer_kwargs=minimizer_kwargs, niter=15, stepsize=0.2)                                    
+                    optimize_modal = basinhopping(lambda x: objective_function(x = x, cluster = cluster, kde = data.data[i], instance = instance, missing_dims = missing_dims, centroids = self.kmeans.cluster_centers_), x0=cluster_centers, minimizer_kwargs=minimizer_kwargs, niter=30, stepsize=0.2)                                    
                     modal_values = optimize_modal.x.tolist()
                     # print(instance)
                     for dim, modal_value in zip(missing_dims, modal_values):
