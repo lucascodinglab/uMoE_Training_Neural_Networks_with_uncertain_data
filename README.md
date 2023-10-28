@@ -16,48 +16,18 @@ The uMoE model is a powerful framework for dealing with uncertain data instances
 </div>
 
 ## Documentation
+### Preprocessing Uncertain Instances
+Working with datasets containing uncertain or missing instances is a common real-world challenge. This project incorporates the uframe library (Christian Amesoeder and Michael Hagn 2023) to handle uncertain data. The uframe extension enables the generation of multidimensional PDFs for uncertain instances using Multiple Imputations by Chained Equations (MICE) (Buuren and Groothuis-Oudshoorn 2011). It also transforms instances into objects, granting access to functions like global mode calculation and sampling. To get started, the uMoE model expects training data in the form of uframe objects. Uncertain attributes can be marked manually, and uframe generates a PDF using MICE, storing it as an object. In academic settings, attributes can be marked as uncertain for uMoE's training.
 
-For detailed information on the uMoE model and its usage, please refer to the documentation in the `docs` directory. It includes tutorials, user guides, and explanations of key concepts.
-In this code:
+### Train uMoE Object with fit()
+After preprocessing and converting data into uframe objects, you can train a uMoE object on uncertain instances using the fit() function. This highly customizable function allows you to specify various hyperparameters, including the learning rate, the number of training epochs, batch sizes for both Experts and the Gating Unit, as well as their corresponding NN-Architectures (number of hidden layers and neurons per layer). Elastic Net regularization (Zou and Hastie 2005) is employed to prevent overfitting by combining L1 (Lasso) and L2 (Ridge) regularization techniques. It encourages sparse model weights and handles highly correlated features effectively. You can set a threshold parameter, 'p', to control how much of the instance's uncertainty the model considers. By choosing 'p=1', the entire PDF is used for training, while values near 0 focus on a small area around the global mode value. The determination of local and global mode values employs the basin hopping optimizer, suitable for highly-dimensional landscapes (Wales and Doye 1997).
 
-We use a parent <div> with display: flex; justify-content: center; align-items: center; to center-align the child elements horizontally and vertically.
-Inside the parent <div>, we have two child <div> elements for each image and its caption.
-Each child <div> is centered individually using text-align:center; and spaced apart with margin-right to create a gap between them.
-You can adjust the width of the images and other CSS styles to fit your layout.
-This code will center-align the images side by side with their respective captions. You can add more child <div> elements for additional images and captions as needed.
+### Prediction with predict()
+After training, the predict() function is used to make predictions on certain instances. It employs clustering to assign instances to relevant Experts and utilizes these Experts for predictions. Cluster probabilities for each instance are used as additional input for the Gating Unit. The final uMoE predictions are returned in a list.
 
+### Evaluation with evaluation()
+The evaluation() function calculates the performance of uMoE model predictions against true target values. It generates task-specific scores, computing accuracy for classification tasks and mean squared error for regression tasks. This function is crucial for assessing how well the model's predictions align with the ground truth.
 
-
-
-
-
-
-
-## Repository Contents
-
-- **code**: This directory contains the Python code implementation of the uMoE model. It includes scripts for training, evaluation, and inference.
-
-- **data**: Example Datasets, that were used for training.
-
-- **docs**: Documentation related to the uMoE model, including user guides and tutorials.
-
-- **models**: Saved model checkpoints and configurations.
-
-## Getting Started
-
-To get started with uMoE, please follow the steps below:
-
-1. **Clone the Repository**: Clone this GitHub repository to your local machine using `git clone`.
-
-2. **Install Dependencies**: Ensure you have all the necessary dependencies installed. You can find a list of required libraries in the `requirements.txt` file.
-
-3. **Explore the Code**: Dive into the `code` directory to explore the codebase. Start with the `main.py` script to train the uMoE model.
-
-4. **Use the Model**: After training, you can use the trained model for inference in your specific applications. Refer to the documentation in the `docs` directory for guidance on how to use uMoE effectively.
-
-## Documentation
-
-For detailed information on the uMoE model and its usage, please refer to the documentation in the `docs` directory. It includes tutorials, user guides, and explanations of key concepts.
 
 ## Citation
 
