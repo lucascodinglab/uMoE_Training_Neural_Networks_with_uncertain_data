@@ -24,11 +24,12 @@ Working with datasets containing uncertain or missing instances is a common real
 After preprocessing and converting data into uframe objects, you can train a uMoE object on uncertain instances using the fit() function. This highly customizable function allows you to specify various hyperparameters, including the learning rate, the number of training epochs, batch sizes for both Experts and the Gating Unit, as well as their corresponding NN-Architectures (number of hidden layers and neurons per layer). Elastic Net regularization (Zou and Hastie 2005) is employed to prevent overfitting by combining L1 (Lasso) and L2 (Ridge) regularization techniques. It encourages sparse model weights and handles highly correlated features effectively. You can set a threshold parameter, 'p', to control how much of the instance's uncertainty the model considers. By choosing 'p=1', the entire PDF is used for training, while values near 0 focus on a small area around the global mode value. The determination of local and global mode values employs the basin hopping optimizer, suitable for highly-dimensional landscapes (Wales and Doye 1997).
 
 <div style="display: flex; justify-content: center; align-items: center;">
-  <div style="text-align:center;">
+  <div style="text-align: center; margin: 0 auto;">
     <img src="Images/LocalMode.png" alt="Documentation" width="200">
-    <p style="font-style:italic;">Demonstration of the Probability Density Function Decomposition</p>
+    <p style="font-style: italic;">Demonstration of the Probability Density Function Decomposition</p>
   </div>
 </div>
+
 
 ### Prediction with predict()
 After training, the predict() function is used to make predictions on certain instances. It employs clustering to assign instances to relevant Experts and utilizes these Experts for predictions. Cluster probabilities for each instance are used as additional input for the Gating Unit. The final uMoE predictions are returned in a list.
