@@ -40,7 +40,7 @@ The evaluation() function calculates the performance of uMoE model predictions a
 
 ## Citation
 
-If you use this uMoE implementation in your research or projects, please consider citing our paper [Luttner, L(2023): Training of Neural Networks with Uncertain Data – A Mixture of Experts Approach] for reference.
+If you use this uMoE implementation in your research or projects, please consider citing our paper [Luttner, L. (2023): Training of Neural Networks with Uncertain Data – A Mixture of Experts Approach] for reference.
 
 
 
