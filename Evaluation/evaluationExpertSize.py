@@ -2,9 +2,9 @@ import numpy as np
 from sklearn.preprocessing import MinMaxScaler
 from sklearn.model_selection import KFold
 import argparse
-import uMoE as pm
-import refMoE as rm
-import utils as ut
+from Model import uMoE as pm
+from Evaluation import refMoE as rm
+from Model import utils as ut
 import uframe as uf
 
 # Create an argument parser to handle command-line arguments
@@ -13,17 +13,18 @@ parser = argparse.ArgumentParser(description="Experimental Results for number of
 parser.add_argument("--dataset", type=str, default="wine_quality", help="Dataset name")
 parser.add_argument("--data_path", type=str, default="D:\Github_Projects\MOE_Training_under_Uncertainty\Datasets", help="Path to data")
 parser.add_argument("--result_path", type=str, default="D:\Evaluation", help="Path to results")
-parser.add_argument("--missing", type=float, default=0.01, help="Missing data percentage")
+parser.add_argument("--verbose", type=bool, default=False, help="Switch for plotting train and val loss")
+parser.add_argument("--missing", type=float, default=0.4, help="Missing data percentage")
 parser.add_argument("--bandwidth", type=float, default=0.1, help="Bandwidth value")
-parser.add_argument("--n_folds", type=int, default=2, help="Number of folds")
-parser.add_argument("--n_experts_max", type=int, default=4, help="Maximum number of subspaces/Experts")
+parser.add_argument("--n_folds", type=int, default=5, help="Number of folds per subspace size")
+parser.add_argument("--n_experts_max", type=int, default=6, help="Maximum number of subspaces/Experts")
 parser.add_argument("--lr", type=float, default=0.01, help="Learning rate")
 parser.add_argument("--reg_lambda", type=float, default=0.002, help="Regularization lambda")
 parser.add_argument("--batch_size_experts", type=int, default=16, help="Batch size for experts")
 parser.add_argument("--batch_size_gate", type=int, default=24, help="Batch size for gating unit")
-parser.add_argument("--n_epochs", type=int, default=20, help="Number of epochs")
-parser.add_argument("--threshold_samples", type=float, default=0.6, help="Threshold samples")
-parser.add_argument("--n_samples", type=int, default=150, help="Number of samples")
+parser.add_argument("--n_epochs", type=int, default=150, help="Number of epochs")
+parser.add_argument("--threshold_samples", type=float, default=0.8, help="Threshold samples")
+parser.add_argument("--n_samples", type=int, default=100, help="Number of samples")
 parser.add_argument("--local_mode", type=bool, default=True, help="Local mode")
 
 
@@ -35,6 +36,7 @@ if __name__ == "__main__":
     result_path = args.result_path
     missing = args.missing
     bandwidth = args.bandwidth
+    verbose = args.verbose
     n_folds = args.n_folds
     n_experts_max = args.n_experts_max
     lr = args.lr
@@ -57,7 +59,7 @@ if __name__ == "__main__":
     X = uf.uframe_from_array_mice_2(data_sc, kernel = "gaussian" , p = missing, bandwidth = bandwidth)
     kwargs = {
           'stepsize':0.2,
-          'niter':30,
+          'niter':25,
     }  
     X_object = X.mode(**kwargs)
 
@@ -105,12 +107,12 @@ if __name__ == "__main__":
             try:
                 umoe = pm.MoE(n, inputsize = input_size, outputsize = output_size, hidden_experts = [16, 16], hidden_gate = [16, 16])
                 umoe.fit(X_train, target_train, X_val, target_val, threshold_samples=threshold_samples, local_mode = local_mode, weighted_experts=True, 
-                        verbose=False, batch_size_experts=batch_size_experts, batch_size_gate=batch_size_gate, n_epochs=n_epochs, 
+                        verbose=verbose, batch_size_experts=batch_size_experts, batch_size_gate=batch_size_gate, n_epochs=n_epochs, 
                         n_samples=n_samples, lr = lr, reg_lambda=reg_lambda, reg_alpha = 0.5)
             except:
                 umoe = pm.MoE(2, inputsize = input_size, outputsize = output_size, hidden_experts = [16, 16], hidden_gate = [16, 16])
                 umoe.fit(X_train, target_train, X_val, target_val, threshold_samples=threshold_samples, local_mode = local_mode, weighted_experts=True, 
-                        verbose=False, batch_size_experts=batch_size_experts, batch_size_gate=batch_size_gate, n_epochs=n_epochs, 
+                        verbose=verbose, batch_size_experts=batch_size_experts, batch_size_gate=batch_size_gate, n_epochs=n_epochs, 
                         n_samples=n_samples, lr = lr, reg_lambda=reg_lambda, reg_alpha = 0.5)
             predictions = umoe.predict(data_test)
             score_moe = umoe.evaluation(predictions, target_test) 
@@ -121,12 +123,12 @@ if __name__ == "__main__":
             try:
                 ref_moe = rm.MoE(n, inputsize = input_size, outputsize = output_size, hidden_experts = [16, 16], hidden_gate = [16, 16])
                 ref_moe.fit(ref_train_mode, target_train, ref_val_mode, target_val,
-                            verbose=False, batch_size_experts=batch_size_experts, batch_size_gate=batch_size_gate, 
+                            verbose=verbose, batch_size_experts=batch_size_experts, batch_size_gate=batch_size_gate, 
                             n_epochs=n_epochs, lr = lr, reg_lambda=reg_lambda, reg_alpha = 0.5)
             except:
                 ref_moe = rm.MoE(2, inputsize = input_size, outputsize = output_size, hidden_experts = [16, 16], hidden_gate = [16, 16])
                 ref_moe.fit(ref_train_mode, target_train, ref_val_mode, target_val,
-                            verbose=False, batch_size_experts=batch_size_experts, batch_size_gate=batch_size_gate, 
+                            verbose=verbose, batch_size_experts=batch_size_experts, batch_size_gate=batch_size_gate, 
                             n_epochs=n_epochs, lr = lr, reg_lambda=reg_lambda, reg_alpha = 0.5)
           
             # predictions / eval
@@ -139,12 +141,12 @@ if __name__ == "__main__":
             try:
                 ref_moe = rm.MoE(n, inputsize = input_size, outputsize = output_size, hidden_experts = [16, 16], hidden_gate = [16, 16])
                 ref_moe.fit(ref_train_ev, target_train, ref_val_ev, target_val,
-                            verbose=False, batch_size_experts=batch_size_experts, batch_size_gate=batch_size_gate, 
+                            verbose=verbose, batch_size_experts=batch_size_experts, batch_size_gate=batch_size_gate, 
                             n_epochs=n_epochs, lr = lr, reg_lambda=reg_lambda, reg_alpha = 0.5)
             except:
                 ref_moe = rm.MoE(2, inputsize = input_size, outputsize = output_size, hidden_experts = [16, 16], hidden_gate = [16, 16])
                 ref_moe.fit(ref_train_ev, target_train, ref_val_ev, target_val,
-                            verbose=False, batch_size_experts=batch_size_experts, batch_size_gate=batch_size_gate, 
+                            verbose=verbose, batch_size_experts=batch_size_experts, batch_size_gate=batch_size_gate, 
                             n_epochs=n_epochs, lr = lr, reg_lambda=reg_lambda, reg_alpha = 0.5)
             # predictions / eval
             predictions_ref = ref_moe.predict(data_test)
@@ -158,7 +160,7 @@ if __name__ == "__main__":
                 nn_mode = rm.MoE(1, inputsize = input_size, outputsize = output_size, hidden_experts = [16, 16],  hidden_gate=[1])
                 # val
                 nn_mode.fit(ref_train_mode, target_train, ref_val_mode, target_val,
-                            verbose=False, batch_size_experts=batch_size_experts, batch_size_gate=batch_size_gate, 
+                            verbose=verbose, batch_size_experts=batch_size_experts, batch_size_gate=batch_size_gate, 
                             n_epochs=n_epochs, lr = lr, reg_lambda=reg_lambda, reg_alpha = 0.5)
                   
                 predictions_ref = nn_mode.predict(data_test)
@@ -173,7 +175,7 @@ if __name__ == "__main__":
                 nn_ev = rm.MoE(1, inputsize = input_size, outputsize = output_size, hidden_experts = [16, 16],  hidden_gate=[1])
                 # val
                 nn_ev.fit(ref_train_ev, target_train, ref_val_ev, target_val,
-                            verbose=False, batch_size_experts=batch_size_experts, batch_size_gate=batch_size_gate, 
+                            verbose=verbose, batch_size_experts=batch_size_experts, batch_size_gate=batch_size_gate, 
                             n_epochs=n_epochs, lr = lr, reg_lambda=reg_lambda, reg_alpha = 0.5)
                   
                 predictions_ref = nn_ev.predict(data_test)

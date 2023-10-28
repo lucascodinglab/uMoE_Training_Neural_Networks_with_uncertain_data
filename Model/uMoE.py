@@ -324,7 +324,7 @@ class MoE():
                 with warnings.catch_warnings():
                     # deactivate warning about optimizer np.inf error
                     warnings.filterwarnings("ignore", category=RuntimeWarning)
-                    optimize_modal = basinhopping(lambda x: objective_function(x = x, cluster = cluster, kde = data.data[i], instance = instance, missing_dims = missing_dims, centroids = self.kmeans.cluster_centers_), x0=cluster_centers, minimizer_kwargs=minimizer_kwargs, niter=30, stepsize=0.2)                                    
+                    optimize_modal = basinhopping(lambda x: objective_function(x = x, cluster = cluster, kde = data.data[i], instance = instance, missing_dims = missing_dims, centroids = self.kmeans.cluster_centers_), x0=cluster_centers, minimizer_kwargs=minimizer_kwargs, niter=25, stepsize=0.2)                                    
                     modal_values = optimize_modal.x.tolist()
                     # print(instance)
                     for dim, modal_value in zip(missing_dims, modal_values):
