@@ -1,3 +1,5 @@
+<a href="https://doi.org/10.5281/zenodo.10050097"><img src="https://zenodo.org/badge/DOI/10.5281/zenodo.10050097.svg" alt="DOI"></a>
+
 # uMoE - Training Neural Networks with uncertain data
 
 Welcome to the Uncertainty-aware Mixture of Experts (uMoE) GitHub repository. This repository contains the implementation and documentation for our uMoE model, designed to train Neural Networks effectively using a mixture of experts architecture.
