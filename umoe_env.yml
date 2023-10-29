@@ -100,4 +100,3 @@ dependencies:
       - pyparsing==3.1.1
       - uframe==0.0.22
       - zipp==3.17.0
-prefix: /dss/dsshome1/00/di93pup/miniconda3/envs/umoe_env
