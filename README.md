@@ -27,7 +27,7 @@ After preprocessing and converting data into uframe objects, you can train a uMo
 
 <div style="display: flex; justify-content: center; align-items: center;">
   <div style="text-align: center; margin: 0 auto;">
-    <img src="Images/LocalMode_Illustration.png" alt="Documentation" width="500">
+    <img src="Images/Local_Mode_Decomposition_Example.png" alt="Documentation" width="500">
     <p style="font-style: italic;">Demonstration of the Probability Density Function Decomposition</p>
   </div>
 </div>
